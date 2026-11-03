@@ -125,6 +125,52 @@ def kq (t : T) (dir : System.FilePath) : IO Unit := do
   close (k2 &&& 0x7fffffff)
   close d
 
+/-- A `cat` that lives until it is killed: its stdin stays open. -/
+def waiter : IO (UInt32 × IO.Process.Child { stdin := .piped, stdout := .null }) := do
+  let child ← IO.Process.spawn { cmd := "cat", stdin := .piped, stdout := .null }
+  return (child.pid, child)
+
+def exits (t : T) : IO Unit := do
+  let end_ (pid : UInt32) := killNow pid.toInt32
+  -- Live processes, watched, then ended: the wait returns once both have exited.
+  let (a, ca) ← waiter
+  let (b, cb) ← waiter
+  -- Ended and reaped before it is watched.
+  let (c, cc) ← waiter
+  end_ c
+  discard cc.wait
+  let w ← watchExits #[a, b, a, c]
+  t.check "watchExits watches live processes, each once" (w.watching == #[a, b]) s!"{w.watching}"
+  t.check "watchExits: a reaped process is gone" (w.gone == #[c]) s!"{w.gone}"
+  t.check "watchExits: nothing failed" w.failed.isEmpty s!"{w.failed}"
+  end_ a
+  end_ b
+  t.check "ExitWatch.wait returns 0 once every watched process exited" ((← w.wait) == 0)
+  -- Both have exited and neither is reaped: a zombie is gone too.
+  let w2 ← watchExits #[a, b]
+  t.check "watchExits: an exited process not yet reaped is gone"
+    (w2.gone == #[a, b] && w2.watching.isEmpty) s!"{w2.watching} {w2.gone} {w2.failed}"
+  t.check "ExitWatch.wait with nothing watched returns 0" ((← w2.wait) == 0)
+  discard ca.wait
+  discard cb.wait
+  -- A process forgotten is not waited for: the wait returns while it lives.
+  let (d, cd) ← waiter
+  let (e, ce) ← waiter
+  let w3 ← (← watchExits #[d, e]).forget d
+  t.check "ExitWatch.forget drops the pid" (w3.watching == #[e]) s!"{w3.watching}"
+  end_ e
+  t.check "ExitWatch.wait waits for the watched only" ((← w3.wait) == 0)
+  let w4 ← watchExits #[d]
+  t.check "the forgotten process still lives" (w4.watching == #[d]) s!"{w4.gone}"
+  end_ d
+  t.check "and its exit ends a wait of its own" ((← w4.wait) == 0)
+  discard cd.wait
+  discard ce.wait
+  -- A watch on a closed kqueue fails with EBADF.
+  let k ← kqOpen
+  close k
+  t.check "watchExit on a closed kqueue gives EBADF" ((← watchExit k a) == 9)
+
 def kqView (t : T) (dir : System.FilePath) : IO Unit := do
   let k ← kqOpen
   let file := dir / "watched"
@@ -211,6 +257,7 @@ def main (args : List String) : IO UInt32 := do
     pty t
     locks t dir
     kq t dir
+    exits t
     kqView t dir
     processes t
     term t

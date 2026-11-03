@@ -16,7 +16,7 @@ their shells hold no C of their own.
 | `Posix.Pty`     | a raw pty (`openpty`), `login_tty`, the window size               |
 | `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, `alarm`, default signals before exec, peak RSS |
 | `Posix.Lock`    | exclusive `flock` on a file or a directory, `link` that fails on a taken name |
-| `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; stdin, SIGWINCH and files for a full-screen program |
+| `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; the exits of processes that need not be children; stdin, SIGWINCH and files for a full-screen program |
 | `Posix.Term`    | a full-screen terminal in raw mode, restored on every exit and signal that can be caught, and handed to a new build across `exec` |
 
 ## Why not `Std.Internal.UV`
@@ -48,7 +48,8 @@ so it stays fetchable.
     lake test
 
 runs each binding against the system: a pty, locks, links, kqueue events of a
-process, its pipe, a directory and files, exec, kill, and the terminal's full
+process, its pipe, a directory and files, the exits of processes watched
+while alive, after their exit and after their reaping, exec, kill, and the terminal's full
 screen entered, left, and left on a signal, in children on a pty.
 
 ## License
