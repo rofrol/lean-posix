@@ -206,6 +206,115 @@ def processes (t : T) : IO Unit := do
   alarm 0
   t.check "peakRss is positive" ((← peakRss) > 0)
 
+instance [BEq ε] [BEq α] : BEq (Except ε α) where
+  beq
+    | .ok a, .ok b => a == b
+    | .error a, .error b => a == b
+    | _, _ => false
+
+/-- What `fd` gives until its end, closing it. -/
+partial def readAll (fd : UInt32) (acc : ByteArray := .empty) : IO ByteArray := do
+  let b ← read fd 4096
+  if b.size == 0 then close fd; return acc else readAll fd (acc ++ b)
+
+/-- `trySpawn argv` with stdout on a pipe: what it printed and its status. -/
+def spawned (argv : Array String) (env : Array String := #[]) (stdin := inherit) (setsid := false) :
+    IO (Except SpawnFailure (String × UInt32)) := do
+  let (r, w) ← Posix.pipe
+  let res ← trySpawn argv env stdin w inherit setsid
+  close w
+  match res with
+  | .error f => close r; return .error f
+  | .ok pid =>
+    let out := text (← readAll r)
+    return .ok (out, ← waitpid pid)
+
+def spawns (t : T) (dir : System.FilePath) : IO Unit := do
+  let r ← spawned #["echo", "hi"]
+  t.check "spawn runs a program found on PATH, its stdout on a pipe" (r == .ok ("hi\n", 0)) s!"{repr r}"
+  let r ← spawned #["/bin/sh", "-c", "echo \"$RRX\"; exit 3"] #["RRX=given"]
+  t.check "spawn adds env's entries, and waitpid gives the exit status" (r == .ok ("given\n", 3)) s!"{repr r}"
+  let home := (← IO.getEnv "HOME").getD ""
+  let r ← spawned #["/bin/sh", "-c", "echo \"$HOME\""] #["HOME=replaced"]
+  t.check "an entry of env replaces the parent's of its name" (r == .ok ("replaced\n", 0)) s!"{repr r} {home}"
+  let r ← spawned #["/bin/sh", "-c", "kill -9 $$"]
+  t.check "waitpid gives 128 plus the signal that ended the child" (r == .ok ("", 137)) s!"{repr r}"
+  let r ← spawned #["cat"] (stdin := devNull)
+  t.check "devNull puts a stream on /dev/null" (r == .ok ("", 0)) s!"{repr r}"
+  let r ← spawned #["/bin/sh", "-c", "ps -o pgid= -p $$ | tr -d ' '; echo $$"] (setsid := true)
+  let leads := match r with
+    | .ok (out, 0) => match out.splitOn "\n" with | [g, p, ""] => g == p | _ => false
+    | _ => false
+  t.check "setsid makes the child lead its process group" leads s!"{repr r}"
+  -- The failed execs Lean's spawn cannot tell from a death.
+  let r ← spawned #[(dir / "missing").toString]
+  t.check "a missing program fails its exec with ENOENT" (r == .error { stage := "exec", errno := 2 }) s!"{repr r}"
+  let r ← spawned #["lean-posix-no-such-program"]
+  t.check "and so does a name on no directory of PATH" (r == .error { stage := "exec", errno := 2 }) s!"{repr r}"
+  IO.FS.writeFile (dir / "plain") "echo ran\n"
+  let r ← spawned #[(dir / "plain").toString]
+  t.check "a file without the execute bit fails its exec with EACCES" (r == .error { stage := "exec", errno := 13 }) s!"{repr r}"
+  IO.FS.writeFile (dir / "orphan") "#!/nonexistent/interpreter\necho ran\n"
+  discard <| IO.Process.output { cmd := "chmod", args := #["+x", (dir / "orphan").toString] }
+  let r ← spawned #[(dir / "orphan").toString]
+  t.check "a script whose interpreter is missing fails its exec with ENOENT" (r == .error { stage := "exec", errno := 2 }) s!"{repr r}"
+  IO.FS.writeFile (dir / "headless") "echo ran\n"
+  discard <| IO.Process.output { cmd := "chmod", args := #["+x", (dir / "headless").toString] }
+  let r ← spawned #[(dir / "headless").toString]
+  t.check "a script with no #! fails its exec with ENOEXEC, run by no shell" (r == .error { stage := "exec", errno := 8 }) s!"{repr r}"
+  -- PATH: a directory whose program cannot be executed is passed for a later one, and
+  -- EACCES is said when no directory has one that runs.
+  let bin := dir / "bin"
+  IO.FS.createDirAll bin
+  IO.FS.writeFile (bin / "lean-posix-echo") "echo ran\n"
+  t.check "candidates follow PATH, an empty entry the current directory"
+    (candidates "x" (some "/a::/b") == #["/a/x", "./x", "/b/x"] && candidates "/a/x" (some "/b") == #["/a/x"]
+      && candidates "x" none == #["/usr/bin/x", "/bin/x"] && candidates "" (some "/a") == #[])
+  -- Looked up on the PATH of the process that spawns: the tests, run again with it.
+  let r ← spawned #[(← IO.appPath).toString, "path-eacces"] #[s!"PATH={bin}"]
+  t.check "a name found only without the execute bit fails with EACCES" (r == .ok ("exec 13\n", 0)) s!"{repr r}"
+  IO.FS.writeFile (dir / "lean-posix-echo") "#!/bin/sh\necho ran\n"
+  discard <| IO.Process.output { cmd := "chmod", args := #["+x", (dir / "lean-posix-echo").toString] }
+  let r ← spawned #[(← IO.appPath).toString, "path-eacces"] #[s!"PATH={bin}:{dir}"]
+  t.check "and is passed for a later directory's that runs" (r == .ok ("ran\n", 0)) s!"{repr r}"
+  -- A setup step that fails before the exec is said with its step.
+  let r ← trySpawn #["true"] #[] 999
+  t.check "a descriptor that is not open fails the setup at dup2" (r == .error { stage := "dup2", errno := 9 }) s!"{repr r}"
+  -- A source closed just before: the result pipe the spawn makes would take its number.
+  let (cr, cw) ← Posix.pipe
+  close cr
+  let r ← trySpawn #["true"] #[] cr
+  close cw
+  t.check "a closed source is refused, not taken for a descriptor the spawn makes" (r == .error { stage := "dup2", errno := 9 }) s!"{repr r}"
+  let r ← trySpawn #[]
+  t.check "no program is ENOENT" (r == .error { stage := "exec", errno := 2 }) s!"{repr r}"
+  let (rd, wr) ← Posix.pipe
+  let res ← trySpawn #["/bin/sh", "-c", "echo out; echo err >&2"] #[] inherit wr wr
+  close wr
+  let both := text (← readAll rd)
+  if let .ok pid := res then discard <| waitpid pid
+  t.check "one descriptor can be stdout and stderr both" (both == "out\nerr\n") both.quote
+  let refused ← (do discard <| trySpawn #["true"] #[] 1; pure false) <|> pure true
+  t.check "a descriptor 0, 1 or 2 is refused before anything starts" refused
+  match ← (spawn #[(dir / "plain").toString]).toBaseIO with
+  | .error e => t.check "spawn throws why: cannot execute" (contains (toString e) "cannot execute" && contains (toString e) "Permission denied") (toString e)
+  | .ok _ => t.check "spawn throws why: cannot execute" false
+  -- writeAll: every byte through a pipe, and EPIPE once its reader is gone.
+  let (r, w) ← Posix.pipe
+  let (o, ow) ← Posix.pipe
+  let pid ← spawn #["cat"] #[] r ow
+  close r; close ow
+  let big := String.ofList (List.replicate 200000 'x')
+  let wrote ← IO.asTask (do let e ← writeAll w big.toUTF8; close w; pure e)
+  let got ← readAll o
+  t.check "writeAll writes every byte, past a full pipe" ((← IO.ofExcept wrote.get) == 0 && got.size == 200000) s!"{got.size}"
+  discard <| waitpid pid
+  let (r, w) ← Posix.pipe
+  close r
+  t.check "writeAll to a pipe with no reader gives EPIPE" ((← writeAll w "x".toUTF8) == 32)
+  close w
+  t.check "waitpid of no child throws" ((← (waitpid 1).toBaseIO) matches .error _)
+
 /-- The output on the pty's master of `tests ARG` run with the slave as its stdio. -/
 def onPty (arg : String) : IO (String × UInt32) := do
   let (m, s) ← openPty
@@ -237,6 +346,10 @@ def main (args : List String) : IO UInt32 := do
   match args with
   | ["exec-fails"] => exec #["/nonexistent/lean-posix"] "lean-posix exec"; return 0
   | ["exec"] => exec #["echo", "became"] "exec"; return 1
+  | ["path-eacces"] =>
+    match ← trySpawn #["lean-posix-echo"] with
+    | .ok pid => return (← waitpid pid)
+    | .error f => IO.println s!"{f.stage} {f.errno}"; return 0
   | ["term"] =>
     if (← termCtl 0) != 0 then return 3
     IO.print "inside"
@@ -260,6 +373,7 @@ def main (args : List String) : IO UInt32 := do
     exits t
     kqView t dir
     processes t
+    spawns t dir
     term t
   finally
     IO.FS.removeDirAll dir
