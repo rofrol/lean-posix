@@ -184,14 +184,46 @@ def kqView (t : T) (dir : System.FilePath) : IO Unit := do
   t.check "kqWait with poll and nothing new" (none_ == 0) s!"{none_}"
   IO.FS.withFile file .append (·.putStr "x")
   IO.FS.withFile other .append (·.putStr "x")
-  let (m, changed) ← kqWait k true
+  let (m, changed, exited) ← kqWait k true
   t.check "kqWait: a file of tag 0 and one of another tag" (m == 4 ||| 8) s!"{m}"
   t.check "kqWait gives the descriptors of tag 0" (changed == #[fd]) s!"{changed}"
+  t.check "kqWait: no process exited" exited.isEmpty s!"{exited}"
+  -- A process's exit, watched on the same kqueue: its own bit and its pid, no descriptor.
+  let (a, ca) ← waiter
+  t.check "watchExit on kqWait's kqueue" ((← watchExit k a) == 0)
+  killNow a.toInt32
+  let (m, changed, exited) ← kqWait k false
+  t.check "kqWait: a watched process exited" (m == 16 && changed.isEmpty && exited == #[a])
+    s!"{m} {changed} {exited}"
+  discard ca.wait
   let r ← watch k (dir / "none").toString 0
   t.check "watch of no file gives ENOENT" (r == 0x80000000 ||| 2) s!"{r}"
   close fd
   close fd2
   close k
+
+def starts (t : T) : IO Unit := do
+  let me ← IO.Process.getPID
+  let mine ← processStart me
+  t.check "processStart of this process" (mine matches .ok _) s!"{repr mine}"
+  let (a, ca) ← waiter
+  let first ← processStart a
+  let again ← processStart a
+  t.check "processStart of a live child, the same each time"
+    (first matches .ok _ && first.toOption == again.toOption) s!"{repr first} {repr again}"
+  t.check "a child started after this process" (match mine, first with
+    | .ok m, .ok f => m ≤ f
+    | _, _ => false) s!"{repr mine} {repr first}"
+  killNow a.toInt32
+  -- Its exit, not reaped: a zombie, which has no start any more.
+  let w ← watchExits #[a]
+  discard w.wait
+  let zombie ← processStart a
+  t.check "processStart of an exited process not yet reaped is ESRCH" (zombie matches .error 3)
+    s!"{repr zombie}"
+  discard ca.wait
+  let reaped ← processStart a
+  t.check "processStart of a reaped process is ESRCH" (reaped matches .error 3) s!"{repr reaped}"
 
 def processes (t : T) : IO Unit := do
   let child ← IO.Process.spawn { cmd := "sleep", args := #["60"] }
@@ -372,6 +404,7 @@ def main (args : List String) : IO UInt32 := do
     kq t dir
     exits t
     kqView t dir
+    starts t
     processes t
     spawns t dir
     term t
