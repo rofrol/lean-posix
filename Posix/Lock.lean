@@ -32,7 +32,7 @@ def lockFile (path : System.FilePath) (block : Bool) : IO (Except UInt32 UInt32)
 path names: above every errno. -/
 def lockElsewhere : UInt32 := 0x10000
 
-@[extern c inline "({ extern int fstat64(int, void*); extern int stat64(const char*, void*); extern int flock(int, int); extern int fcntl(int, int, ...); extern int* __error(void); unsigned long long a[32], b[32]; unsigned r; int fd = (int)#2; if (fstat64(fd, a) != 0 || stat64(lean_string_cstr(#1), b) != 0) r = (unsigned)*__error(); else if (((int*)a)[0] != ((int*)b)[0] || a[1] != b[1]) r = 0x10000u; else { int k; do k = flock(fd, 2 | 4); while (k != 0 && *__error() == 4); if (k != 0) r = (unsigned)*__error(); else r = fcntl(fd, 2, 1) == 0 ? 0u : (unsigned)*__error(); } lean_io_result_mk_ok(lean_box_uint32(r)); })"]
+@[extern c inline "({ extern int fstat64(int, void*); extern int stat64(const char*, void*); extern int flock(int, int); extern int fcntl(int, int, ...); extern int* __error(void); extern int memcmp(const void*, const void*, unsigned long); unsigned long long a[32], b[32]; unsigned r; int fd = (int)#2; if (fstat64(fd, a) != 0 || stat64(lean_string_cstr(#1), b) != 0) r = (unsigned)*__error(); else if (memcmp(a, b, 4) != 0 || a[1] != b[1]) r = 0x10000u; else { int k; do k = flock(fd, 2 | 4); while (k != 0 && *__error() == 4); if (k != 0) r = (unsigned)*__error(); else r = fcntl(fd, 2, 1) == 0 ? 0u : (unsigned)*__error(); } lean_io_result_mk_ok(lean_box_uint32(r)); })"]
 private opaque lockHandedRaw (path : @& String) (fd : UInt32) : IO UInt32
 
 /-- Takes over the lock of the file `path` that the program this process was before
