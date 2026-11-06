@@ -16,7 +16,7 @@ their shells hold no C of their own.
 | `Posix.Pty`     | a raw pty (`openpty`), `login_tty`, the window size               |
 | `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, `alarm`, default signals before exec, a process's start time (`proc_pidinfo`), peak RSS |
 | `Posix.Spawn`   | a spawn that says whether its exec failed (fork, a close-on-exec pipe for the exec's result, `execve` along PATH), `pipe`, `waitpid`, a write of every byte |
-| `Posix.Lock`    | exclusive `flock` on a file or a directory, `link` that fails on a taken name |
+| `Posix.Lock`    | exclusive `flock` on a file or a directory, such a lock handed to the next program this process executes (`fstat`, `stat`), `link` that fails on a taken name |
 | `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; the exits of processes that need not be children; stdin, SIGWINCH, files and exits of processes for a full-screen program |
 | `Posix.Term`    | a full-screen terminal in raw mode, restored on every exit and signal that can be caught, and handed to a new build across `exec` |
 
@@ -50,7 +50,7 @@ so it stays fetchable.
 
     lake test
 
-runs each binding against the system: a pty, locks, links, kqueue events of a
+runs each binding against the system: a pty, locks, a lock handed across exec, links, kqueue events of a
 process, its pipe, a directory and files, the exits of processes watched
 while alive, after their exit and after their reaping, on their own kqueue and a full-screen
 program's, processes' start times, exec, kill, spawns that

@@ -74,6 +74,49 @@ def pty (t : T) : IO Unit := do
   let (rows, cols) ← winSize
   t.check "winSize is positive" (rows > 0 && cols > 0)
 
+/-- The exit status of `tests lock-handed PATH FD` with `fd`, and `open` (a shell
+redirection) before it: 0 once it took over the lock, else the errno or 255. -/
+def handedIn (path : System.FilePath) (fd : UInt32) (open_ : String := "") : IO UInt32 := do
+  let child ← IO.Process.spawn { cmd := "/bin/sh", args := #["-c", s!"exec \"$0\" lock-handed \"$1\" {fd} {open_}", (← IO.appPath).toString, path.toString] }
+  child.wait
+
+/-- `lockHanded`: a lock kept across exec, taken over by the next program. -/
+def handed (t : T) (dir : System.FilePath) : IO Unit := do
+  let path := dir / "handed"
+  let .ok fd ← lockFile path false | t.check "lockFile takes the lock to hand" false
+  -- A copy with close-on-exec cleared, as a program hands it to its next build.
+  let d ← dupPrivate fd
+  dup2 fd d
+  unlock fd
+  -- The child's exec keeps it, as an exec of this process would.
+  let code ← handedIn path d
+  t.check "a program this process executes takes over the lock it is handed" (code == 0) s!"{code}"
+  match ← lockHanded path d with
+  | .ok got => t.check "lockHanded takes over the lock the descriptor holds" (got == d)
+  | .error e => t.check "lockHanded takes over the lock the descriptor holds" false s!"{e}"
+  let code ← handedIn path d
+  t.check "and no child inherits it after" (code == 9) s!"{code}"
+  match ← lockFile path false with
+  | .error e => t.check "the lock stays held" (e == lockHeld) s!"errno {e}"
+  | .ok _ => t.check "the lock stays held" false "it was taken again"
+  let code ← handedIn path 9 s!"9<\"$1\""
+  t.check "a descriptor of the file not holding a held lock gets lockHeld" (code == lockHeld) s!"{code}"
+  let .ok other ← lockFile (dir / "other") false | t.check "lockFile takes another lock" false
+  match ← lockHanded path other with
+  | .error e => t.check "a descriptor of another file is refused with lockElsewhere" (e == lockElsewhere) s!"{e}"
+  | .ok _ => t.check "a descriptor of another file is refused with lockElsewhere" false
+  unlock other
+  match ← lockHanded path 999 with
+  | .error e => t.check "a descriptor not open gets EBADF" (e == 9) s!"{e}"
+  | .ok _ => t.check "a descriptor not open gets EBADF" false
+  match ← lockHanded (dir / "none") d with
+  | .error e => t.check "a path not there gets ENOENT" (e == 2) s!"{e}"
+  | .ok _ => t.check "a path not there gets ENOENT" false
+  unlock d
+  match ← lockFile path false with
+  | .ok fd => t.check "closing the descriptor taken over lets the lock go" true; unlock fd
+  | .error e => t.check "closing the descriptor taken over lets the lock go" false s!"errno {e}"
+
 def locks (t : T) (dir : System.FilePath) : IO Unit := do
   let path := dir / "lock"
   match ← lockFile path false with
@@ -90,6 +133,7 @@ def locks (t : T) (dir : System.FilePath) : IO Unit := do
   match ← lockFile (dir / "no" / "lock") true with
   | .error e => t.check "lockFile with no directory gives ENOENT" (e == 2) s!"errno {e}"
   | .ok _ => t.check "lockFile with no directory gives ENOENT" false
+  handed t dir
   t.check "lockDir locks a directory" ((← lockDir dir.toString) != 0xffffffff)
   t.check "lockDir of no directory fails" ((← lockDir (dir / "none").toString) == 0xffffffff)
   IO.FS.writeFile (dir / "a") "a"
@@ -378,6 +422,10 @@ def main (args : List String) : IO UInt32 := do
   match args with
   | ["exec-fails"] => exec #["/nonexistent/lean-posix"] "lean-posix exec"; return 0
   | ["exec"] => exec #["echo", "became"] "exec"; return 1
+  | ["lock-handed", path, fd] =>
+    match ← lockHanded path (fd.toNat?.getD 0).toUInt32 with
+    | .ok _ => return 0
+    | .error e => return if e < 255 then e else 255
   | ["path-eacces"] =>
     match ← trySpawn #["lean-posix-echo"] with
     | .ok pid => return (← waitpid pid)
