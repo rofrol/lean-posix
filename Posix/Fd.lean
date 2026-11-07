@@ -48,4 +48,10 @@ opaque isatty (fd : UInt32) : IO Bool
 @[extern c inline "({ extern char* strerror(int); lean_io_result_mk_ok(lean_mk_string(strerror((int)#1))); })"]
 opaque strerror (errno : UInt32) : IO String
 
+/-- Sets the access and modification times of the file at `path` to `ms`
+milliseconds since the epoch (`utimes`; macOS's `struct timeval` is a `long` and an
+`int`): 0, or the errno. -/
+@[extern c inline "({ extern int utimes(const char*, const void*); extern int* __error(void); uint64_t ms = #2; struct { long s; int us; } v[2] = {{(long)(ms / 1000), (int)(ms % 1000) * 1000}, {(long)(ms / 1000), (int)(ms % 1000) * 1000}}; lean_io_result_mk_ok(lean_box_uint32(utimes(lean_string_cstr(#1), v) == 0 ? 0u : (unsigned)*__error())); })"]
+opaque setTimes (path : @& String) (ms : UInt64) : IO UInt32
+
 end Posix

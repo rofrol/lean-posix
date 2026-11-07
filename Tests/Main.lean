@@ -52,6 +52,20 @@ def fds (t : T) (dir : System.FilePath) : IO Unit := do
   -- The handle's last reference closes its descriptor: it is kept until here.
   discard h.isTty
   t.check "strerror says what ENOENT means" ((← strerror 2) == "No such file or directory")
+  t.check "setTimes sets a file's times" ((← setTimes file.toString 1700000000123) == 0)
+  let mt := (← file.metadata).modified
+  t.check "to the millisecond" (mt.sec == 1700000000 && mt.nsec == 123000000) s!"{mt.sec} {mt.nsec}"
+  t.check "setTimes of no file is its errno" ((← setTimes (dir / "none").toString 0) == 2)
+
+/-- What `fd` gives until it holds `n` lines or ends, in at most 100 reads. -/
+def linesOf (fd : UInt32) (n : Nat) : IO String := do
+  let mut acc := ByteArray.empty
+  for _ in [0:100] do
+    if (text acc).foldl (fun k c => if c == '\n' then k + 1 else k) 0 ≥ n then break
+    let b ← read fd 256
+    if b.size == 0 then break
+    acc := acc ++ b
+  return text acc
 
 def pty (t : T) : IO Unit := do
   let (m, s) ← openPty
@@ -73,6 +87,23 @@ def pty (t : T) : IO Unit := do
   close m
   let (rows, cols) ← winSize
   t.check "winSize is positive" (rows > 0 && cols > 0)
+  -- A child on a pty that its session controls: the size set before it starts, and
+  -- again while it runs, which it hears as SIGWINCH (`tests winch`, which watches
+  -- for it on a kqueue before it prints the first size, so none is missed).
+  let (m, s) ← openPty
+  let r ← trySpawn #["true"] #[] s s s (ctty := true)
+  let refused := match r with | .error f => f == { stage := "TIOCSCTTY", errno := 1 } | .ok _ => false
+  t.check "ctty outside a session of its own fails at TIOCSCTTY with EPERM" refused s!"{repr r}"
+  t.check "setWinSize sets a pty's size" ((← setWinSize s 33 77) == 0)
+  let pid ← spawn #[(← IO.appPath).toString, "winch"] #[] s s s (setsid := true) (ctty := true)
+  let first ← linesOf m 1
+  t.check "with setsid and ctty, the pty is the child's controlling terminal, of the size set" (first == "33 77\n") first.quote
+  t.check "setWinSize on the master" ((← setWinSize m 40 120) == 0)
+  let second ← linesOf m 1
+  t.check "a size set on the master reaches the child as SIGWINCH" (second == "40 120\n") second.quote
+  t.check "and the child exits" ((← waitpid pid) == 0)
+  close s
+  close m
 
 /-- The exit status of `tests lock-handed PATH FD` with `fd`, and `open` (a shell
 redirection) before it: 0 once it took over the lock, else the errno or 255. -/
@@ -313,6 +344,8 @@ def spawns (t : T) (dir : System.FilePath) : IO Unit := do
   let home := (← IO.getEnv "HOME").getD ""
   let r ← spawned #["/bin/sh", "-c", "echo \"$HOME\""] #["HOME=replaced"]
   t.check "an entry of env replaces the parent's of its name" (r == .ok ("replaced\n", 0)) s!"{repr r} {home}"
+  let r ← spawned #["/bin/sh", "-c", "echo \"${HOME-none}\""] #["HOME"]
+  t.check "an entry of env without = removes the parent's of its name" (r == .ok ("none\n", 0)) s!"{repr r}"
   let r ← spawned #["/bin/sh", "-c", "kill -9 $$"]
   t.check "waitpid gives 128 plus the signal that ended the child" (r == .ok ("", 137)) s!"{repr r}"
   let r ← spawned #["cat"] (stdin := devNull)
@@ -430,6 +463,18 @@ def main (args : List String) : IO UInt32 := do
     match ← trySpawn #["lean-posix-echo"] with
     | .ok pid => return (← waitpid pid)
     | .error f => IO.println s!"{f.stage} {f.errno}"; return 0
+  | ["winch"] =>
+    let kq ← kqOpen
+    kqSetup kq
+    let say : IO Unit := do
+      let (rows, cols) ← winSize
+      IO.print s!"{rows} {cols}\n"
+      (← IO.getStdout).flush
+    say
+    for _ in [0:100] do
+      let (m, _) ← kqWait kq false
+      if m &&& 2 != 0 then say; return 0
+    return 4
   | ["term"] =>
     if (← termCtl 0) != 0 then return 3
     IO.print "inside"
