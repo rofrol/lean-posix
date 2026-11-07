@@ -34,6 +34,13 @@ it executes its command: an ignored signal survives exec, and Lean ignores SIGPI
 @[extern c inline "({ extern void (*signal(int, void (*)(int)))(int); int s[] = {1, 2, 3, 13, 15}; for (int i = 0; i < 5; i++) signal(s[i], 0); lean_io_result_mk_ok(lean_box(0)); })"]
 opaque defaultSignals : IO Unit
 
+/-- The default of SIGPIPE alone, for a process about to execute another program in
+its place that keeps every other signal as its parent gave it: Lean ignores SIGPIPE
+in every program it builds, and an ignored signal survives exec, while a signal its
+parent ignored, such as SIGINT and SIGQUIT in a shell's `&` job, stays ignored. -/
+@[extern c inline "({ extern void (*signal(int, void (*)(int)))(int); signal(13, 0); lean_io_result_mk_ok(lean_box(0)); })"]
+opaque defaultPipe : IO Unit
+
 /-- When process `pid` started, in microseconds since the Unix epoch, as macOS's
 `proc_pidinfo` (`PROC_PIDTBSDINFO`) gives it, with the high bit clear; or the high
 bit or-ed with the errno when it cannot be read (ESRCH: no live process has that

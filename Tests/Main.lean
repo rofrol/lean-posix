@@ -310,6 +310,10 @@ def processes (t : T) : IO Unit := do
   t.check "exec that fails returns and says why" (out.exitCode == 0 && contains out.stderr "lean-posix exec") out.stderr
   let out ← IO.Process.output { cmd := (← IO.appPath).toString, args := #["exec"] }
   t.check "exec becomes the command" (out.stdout == "became\n") out.stdout
+  -- A shell ignores SIGINT for the program it executes; `defaultPipe` keeps that
+  -- and puts back the SIGPIPE Lean ignores, so the command dies of SIGPIPE alone.
+  let out ← IO.Process.output { cmd := "/bin/sh", args := #["-c", "trap '' INT; exec \"$0\" default-pipe", (← IO.appPath).toString] }
+  t.check "defaultPipe keeps an ignored SIGINT and puts back SIGPIPE" (out.exitCode == 128 + 13 && out.stdout == "") s!"{out.exitCode} {out.stdout.quote}"
   alarm 0
   t.check "peakRss is positive" ((← peakRss) > 0)
 
@@ -455,6 +459,9 @@ def main (args : List String) : IO UInt32 := do
   match args with
   | ["exec-fails"] => exec #["/nonexistent/lean-posix"] "lean-posix exec"; return 0
   | ["exec"] => exec #["echo", "became"] "exec"; return 1
+  | ["default-pipe"] =>
+    defaultPipe
+    exec #["/bin/sh", "-c", "kill -s INT $$; kill -s PIPE $$; echo survived"] "default-pipe"; return 1
   | ["lock-handed", path, fd] =>
     match ← lockHanded path (fd.toNat?.getD 0).toUInt32 with
     | .ok _ => return 0
