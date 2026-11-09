@@ -1,3 +1,5 @@
 lean-posix: lockDir gives up when a signal interrupts its blocking flock
 
 Raised in consult round 20261109-155335-a3a0 (argon: EINTR audit), checked in the code: `lockDir` (`Posix/Lock.lean:59`) calls a blocking `flock(fd, LOCK_EX)` once and returns -1 ("cannot be had") on any failure, while `lockFile` (`Posix/Lock.lean:17`) loops past EINTR. A caught signal whose handler lacks SA_RESTART interrupts the wait: `termCtl 1001`'s handler uses flags 0x14, which has no SA_RESTART on macOS (item ldvclw). Work: wait past EINTR as `lockFile` does, and say so in the doc comment. Check: a test in a child process that catches a signal without SA_RESTART, blocks in `lockDir` on a directory another process holds, gets that signal, and still takes the lock once the holder ends.
+
+Note from consult round 20261109-165501-ee87: the test synchronizes on observable events (pipes between the processes, the signal's arrival), never on elapsed time; if entry into the blocking `flock` cannot be observed, the item says so in its report rather than inferring it from a delay.
