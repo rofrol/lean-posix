@@ -23,7 +23,8 @@
   change to what a public declaration returns, blocks on, or leaves open or
   inherited is a public contract change (AGENTS.md, Human Responsibility).
 - Consumers pin a commit; each pinned commit carries a tag `pin/<sha12>` here
-  (`README.md`, "Use").
+  (`README.md`, "Use"). Moving rr2's tags when this history is rewritten is
+  the owner's exception in `DECISIONS.md` ("History and pin tags").
 
 ## Architecture map
 
