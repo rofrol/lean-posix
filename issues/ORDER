@@ -1,6 +1,5 @@
 ## Next, in order
 
-nhg7tl lean-posix: lockDir gives up when a signal interrupts its blocking flock
 jd6rjr lean-posix: openPty's master is made close-on-exec only after openpty returns, so a fork in another thread can inherit it
 6wkd7n lean-posix: record here the owner's ruling that its history may be rewritten and rr2's pin tags moved
 
@@ -11,5 +10,6 @@ gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the 
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 wnex37 termCtl's signal handler is called through a cast function pointer type
 2aeepb termCtl op 1001 ignores SIGTSTP (18), while its doc says SIGCONT
+abcwsi lean-posix: confirm the two assumptions behind the lockDir EINTR test
 
 ## Needs a decision
