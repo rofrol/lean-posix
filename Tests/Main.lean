@@ -139,6 +139,14 @@ def pty (t : T) : IO Unit := do
   let refused := match r with | .error f => f == { stage := "TIOCSCTTY", errno := 1 } | .ok _ => false
   t.check "ctty outside a session of its own fails at TIOCSCTTY with EPERM" refused s!"{repr r}"
   t.check "setWinSize sets a pty's size" ((← setWinSize s 33 77) == 0)
+  let sz ← winSizeOf s
+  let szm ← winSizeOf m
+  t.check "winSizeOf a pty's slave and master gives the size set"
+    (sz.toOption == some (33, 77) && szm.toOption == some (33, 77)) s!"{sz.toOption} {szm.toOption}"
+  let (pr, pw) ← Posix.pipe
+  let np ← winSizeOf pr
+  t.check "winSizeOf a pipe is ENOTTY" (match np with | .error e => e == 25 | .ok _ => false) s!"{np.toOption}"
+  close pr; close pw
   let pid ← spawn #[(← IO.appPath).toString, "winch"] #[] s s s (setsid := true) (ctty := true)
   let first ← linesOf m 1
   t.check "with setsid and ctty, the pty is the child's controlling terminal, of the size set" (first == "33 77\n") first.quote
@@ -495,6 +503,21 @@ def spawns (t : T) (dir : System.FilePath) : IO Unit := do
   t.check "waitOutcome gives an exit of 0" (r == .exited 0) s!"{repr r}"
   t.check "waitOutcome of no child throws" ((← (waitOutcome 1).toBaseIO) matches .error _)
 
+/-- `kill` with any signal, and `catchSignals` in a child of its own (`tests
+signals`), so this process keeps its own dispositions. -/
+def signals (t : T) : IO Unit := do
+  for sig in [(15 : UInt8), 1] do
+    let pid ← spawn #["sleep", "100"]
+    let sent ← kill pid.toInt32 sig.toUInt32
+    let r ← waitOutcome pid
+    t.check s!"kill {sig} ends a child with that signal" (sent == 0 && r == .signaled sig) s!"{sent} {repr r}"
+    t.check s!"kill of the reaped child is ESRCH" ((← kill pid.toInt32 sig.toUInt32) == 3)
+  t.check "kill 0 to this process checks it" ((← kill (← IO.Process.getPID).toInt32 0) == 0)
+  t.check "kill of no such signal is EINVAL" ((← kill (← IO.Process.getPID).toInt32 99) == 22)
+  let out ← IO.Process.output { cmd := (← IO.appPath).toString, args := #["signals"] }
+  t.check "catchSignals reports SIGTERM then SIGHUP sent to the process, which lives on; a child spawned after it dies of SIGINT"
+    (out.exitCode == 0 && out.stdout == "15 1 2\n") s!"{out.exitCode} {out.stdout.quote} {out.stderr.quote}"
+
 /-- The output on the pty's master of `tests ARG` run with the slave as its stdio. -/
 def onPty (arg : String) : IO (String × UInt32) := do
   let (m, s) ← openPty
@@ -564,6 +587,21 @@ def main (args : List String) : IO UInt32 := do
     match ← trySpawn #["lean-posix-echo"] with
     | .ok pid => return (← waitpid pid)
     | .error f => IO.println s!"{f.stage} {f.errno}"; return 0
+  | ["signals"] =>
+    let kq ← kqOpen
+    if (← catchSignals kq #[9]) != 22 then IO.println "SIGKILL caught"; return 1
+    if (← catchSignals kq #[15, 1, 2]) != 0 then return 2
+    let self := (← IO.Process.getPID).toInt32
+    if (← kill self 15) != 0 || (← kill self 1) != 0 then return 3
+    let a ← nextSignal kq
+    let b ← nextSignal kq
+    let child ← waitOutcome (← spawn #["/bin/sh", "-c", "kill -s INT $$; exit 7"])
+    let say : Except UInt32 UInt32 → String
+      | .ok s => toString s
+      | .error e => s!"error {e}"
+    let c := match child with | .signaled s => toString s | .exited e => s!"exit {e}"
+    IO.println s!"{say a} {say b} {c}"
+    return 0
   | ["winch"] =>
     let kq ← kqOpen
     kqSetup kq
@@ -623,6 +661,7 @@ def main (args : List String) : IO UInt32 := do
     kqView t dir
     starts t
     processes t
+    signals t
     spawns t dir
     term t
   finally

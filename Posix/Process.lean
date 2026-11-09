@@ -4,6 +4,7 @@
 Lean's `IO.Process` spawns and waits; it cannot become another program in the same
 process, kill a process group, or put signals back to their defaults. The numbers
 are macOS's: SIGHUP 1, SIGINT 2, SIGQUIT 3, SIGKILL 9, SIGPIPE 13, SIGTERM 15,
+ESRCH 3, EPERM 1, EINVAL 22,
 RUSAGE_SELF 0, PROC_PIDTBSDINFO 3; `struct proc_bsdinfo` is 136 bytes, its
 `pbi_start_tvsec` and `pbi_start_tvusec` at 120 and 128.
 -/
@@ -24,6 +25,16 @@ opaque execResume (path : @& String) : IO UInt32
 /-- SIGKILL to `pid`; `pid` negative is a process group. -/
 @[extern c inline "({ extern int kill(int, int); kill((int)#1, 9); lean_io_result_mk_ok(lean_box(0)); })"]
 opaque killNow (pid : Int32) : IO Unit
+
+/-- Sends signal `sig` to `pid` (`pid` below -1 is the process group `-pid`, 0 the
+caller's group, -1 every process the caller may signal, as macOS's `kill(2)` says;
+`sig` 0 only checks that the process can be signalled): 0 when it was sent,
+or the errno: ESRCH (3) when no process has that pid; EPERM (1) when it is not the
+caller's to signal; EINVAL (22) for no such signal. A child that exited and is not
+reaped yet still has its pid: the signal is "sent" (0) and does nothing (measured on
+macOS 27), so ESRCH means the pid is free, and may already be another process's. -/
+@[extern c inline "({ extern int kill(int, int); extern int* __error(void); lean_io_result_mk_ok(lean_box_uint32(kill((int)#1, (int)#2) == 0 ? 0u : (unsigned)*__error())); })"]
+opaque kill (pid : Int32) (sig : UInt32) : IO UInt32
 
 /-- SIGALRM after `seconds`, or none with zero. Its default ends the process. -/
 @[extern c inline "({ extern unsigned alarm(unsigned); alarm(#1); lean_io_result_mk_ok(lean_box(0)); })"]

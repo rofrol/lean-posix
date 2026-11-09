@@ -44,9 +44,9 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   bytes without waiting), `handleFd` (the descriptor under an
   `IO.FS.Handle`), `isatty`, `strerror`, `setTimes` (`utimes`).
 - `Pty.lean`: `openPty` (raw), `loginTty`, `winSize` (stdout's),
-  `setWinSize`.
+  `winSizeOf` (any descriptor's, or the errno), `setWinSize`.
 - `Process.lean`: `exec` (`execvp` in place), `execResume` (`execv` of
-  `path --resume`), `killNow` (SIGKILL to a process or group), `alarm`,
+  `path --resume`), `killNow` (SIGKILL to a process or group), `kill` (any signal, the errno), `alarm`,
   `defaultSignals`, `defaultPipe`, `processStart` (`proc_pidinfo` start time),
   `peakRss`.
 - `Spawn.lean` (imports `Fd`): `trySpawn`/`spawn` (fork, a close-on-exec
@@ -58,13 +58,14 @@ Modules, each under `Posix/`, all in `namespace Posix`:
 - `Lock.lean`: `lockFile`/`unlock`, `lockHanded` (a lock handed across
   exec; `lockHeld`, `lockElsewhere`), `lockDir`, `link`. `lockRaw` is public
   but internal to `lockFile`.
-- `Kqueue.lean` (imports `Fd`): three kinds of waiting. A process and its
+- `Kqueue.lean` (imports `Fd`): four kinds of waiting. A process and its
   output pipe and a directory (`openEvents`, `watchSession`, `nextEvent`,
   `unwatchRead`); a full-screen program's stdin, SIGWINCH, files and process
   exits (`kqOpen`, `kqSetup`, `watch`, `watchExit`, `unwatchExit`, `kqWait`,
   `kqWaitFor`); the exits of processes that need not be children
   (`watchExits`, `ExitWatch`, `ExitWatch.forget`, `ExitWatch.wait`,
-  `awaitExits`).
+  `awaitExits`); catchable signals as events, each caught by a no-op handler
+  that exec resets (`catchSignals`, `nextSignal`).
 - `Term.lean`: `termCtl` (one entry point by numeric `op`: enter, leave,
   install signal handlers, hand the terminal across exec through
   `LEAN_POSIX_TERMIOS`, or a signal number arriving) and `termEnter`. Its C
@@ -82,7 +83,8 @@ module imports another; nothing here imports a consumer. The tests import
   struct layout or constant that is wrong for the running OS is undefined
   behavior, caught only by `lake test` on that OS.
 - Privileged or process-wide effects: `exec`/`execResume` replace the
-  process; `killNow` signals any pid or group the caller names; `termCtl`
+  process; `killNow` and `kill` signal any pid or group the caller names;
+  `catchSignals` catches the signals it is given process-wide with a no-op handler; `termCtl`
   installs handlers for every catchable terminating signal, ignores SIGCONT,
   changes stdin's termios and writes escape sequences to stdout;
   `defaultSignals`/`defaultPipe` change signal dispositions; `trySpawn`

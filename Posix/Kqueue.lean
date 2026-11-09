@@ -15,13 +15,16 @@ ways of waiting a program built on this library uses, each one blocking `kevent`
 - the exits of processes that need not be this program's children
   (`watchExits`, `ExitWatch.wait`), which nothing else in Lean or POSIX can wait
   for.
+- catchable signals as events (`catchSignals`, `nextSignal`), for a program
+  that passes them on to a child instead of dying of them.
 
 macOS's numbers: EVFILT_READ -1, EVFILT_VNODE -4, EVFILT_PROC -5, EVFILT_SIGNAL -6,
 EV_ADD 1, EV_DELETE 2, EV_ONESHOT 0x10, EV_CLEAR 0x20, EV_EOF 0x8000, NOTE_DELETE 1,
 NOTE_WRITE 2, NOTE_EXTEND 4, NOTE_RENAME 0x20, NOTE_EXIT 0x80000000, SIGWINCH 28,
 F_SETFD 2, FD_CLOEXEC 1, F_GETFL 3, F_SETFL 4, O_NONBLOCK 4, O_EVTONLY 0x8000,
-O_CLOEXEC 0x1000000, EINTR 4, ESRCH 3, CLOCK_MONOTONIC 6. `struct kevent` is declared in each expression as
-macOS lays it out.
+O_CLOEXEC 0x1000000, EINTR 4, ESRCH 3, EINVAL 22, CLOCK_MONOTONIC 6, SIGKILL 9, SIGSTOP 17,
+NSIG 32, SA_RESTART 2. `struct kevent` and `struct sigaction` (handler, a 32-bit mask,
+flags) are declared in each expression as macOS lays them out.
 -/
 
 namespace Posix
@@ -56,6 +59,56 @@ opaque kqOpen : IO UInt32
 reaches the kqueue. -/
 @[extern c inline "({ extern int kevent(int, const void*, int, void*, int, const void*); struct { unsigned long id; short f; unsigned short fl; unsigned ff; long d; void* u; } c[2] = {{0, -1, 1, 0, 0, 0}, {28, -6, 1, 0, 0, 0}}; kevent((int)#1, c, 2, 0, 0, 0); lean_io_result_mk_ok(lean_box(0)); })"]
 opaque kqSetup (kq : UInt32) : IO Unit
+
+/-- The handler `catchSignals` installs: it does nothing. Its C name is what that
+installs; with an unboxed argument and result it is a plain C function that touches
+no Lean object, so it is safe in a signal handler. It is called through a
+`void (*)(int)`, as `termCtl` is: the argument comes in the same register and the
+result is dropped on arm64 and x86_64 macOS. -/
+@[noinline, export lean_posix_signal_caught]
+private def signalCaught (sig : UInt32) : UInt32 := sig
+
+/-- Watches the signals `sigs` on `kq` and catches each with a handler that does
+nothing, so that it no longer ends, stops or is ignored by this process but arrives
+on `kq` (EVFILT_SIGNAL): 0, or the errno of the first signal that failed, those
+before it watched and caught (EINVAL (22) for SIGKILL, SIGSTOP or a number that is
+no signal). Each is watched on `kq` before it is caught, so one that comes in
+between still has the effect it had before the call (its default, unless the
+program changed it), never a lost event. `nextSignal` reads them; `kqWait` would report
+any of them as bit 2, a new window size, so give them a kqueue of their own (from
+`kqOpen`) when the program also uses `kqWait`.
+
+Caught, not ignored: an ignored signal stays ignored across exec, so a child
+started afterwards (by `spawn`, `trySpawn`, Lean's spawn, `posix_spawn`) would not
+die of SIGINT on Ctrl-C; exec resets a caught signal to its default, so the program
+the child executes gets SIGHUP, SIGINT, SIGTERM and the others with their default
+effect. The signal mask is not changed, and a kqueue is not inherited. Between
+`fork` and exec, `trySpawn`'s child still has the handler: a signal sent to it in
+that window does nothing, and it executes its program all the same.
+
+A wrapper that forwards SIGTERM and SIGHUP to its child calls this before it starts
+the child: a signal before the call ends the wrapper while there is no child to
+orphan, and one after it reaches `kq`, to be passed on with `kill`. With SIGINT
+caught too, a Ctrl-C reaches the child in the same process group and leaves the
+wrapper running to reap it. The handlers are process-wide and stay until the
+program changes them (`defaultSignals`, `termCtl 1001`). -/
+@[extern c inline "({ extern int kevent(int, const void*, int, void*, int, const void*); extern int sigaction(int, const void*, void*); extern int* __error(void); extern uint32_t lean_posix_signal_caught(uint32_t); struct { unsigned long id; short f; unsigned short fl; unsigned ff; long d; void* u; } c = {0, -6, 1, 0, 0, 0}; struct { void (*h)(int); unsigned m; int f; } a = { (void (*)(int))lean_posix_signal_caught, 0, 0x2 }; unsigned r = 0; size_t n = lean_array_size(#2); for (size_t i = 0; i < n && r == 0; i++) { int s = (int)lean_unbox_uint32(lean_array_get_core(#2, i)); if (s <= 0 || s >= 32 || s == 9 || s == 17) { r = 22; break; } c.id = (unsigned long)s; if (kevent((int)#1, &c, 1, 0, 0, 0) != 0 || sigaction(s, &a, 0) != 0) r = (unsigned)*__error(); } lean_io_result_mk_ok(lean_box_uint32(r)); })"]
+opaque catchSignals (kq : UInt32) (sigs : @& Array UInt32) : IO UInt32
+
+/-- `nextSignal`'s result, encoded: the signal's number, or the high bit or-ed with
+the errno. -/
+@[extern c inline "({ extern int kevent(int, const void*, int, void*, int, const void*); extern int* __error(void); struct { unsigned long id; short f; unsigned short fl; unsigned ff; long d; void* u; } e; int n; do n = kevent((int)#1, 0, 0, &e, 1, 0); while (n < 0 && *__error() == 4); uint64_t r = n < 0 ? (1ull << 63) | (unsigned)*__error() : n != 1 || e.f != -6 ? (1ull << 63) | 22u : (uint64_t)(unsigned)e.id; lean_io_result_mk_ok(lean_box_uint64(r)); })"]
+private opaque nextSignalRaw (kq : UInt32) : IO UInt64
+
+/-- Blocks until a signal watched on `kq` by `catchSignals` arrives, and gives its
+number. One signal sent again before it is read comes once (the count is not
+kept). Two different signals sent one after the other came in that order (the
+test, on macOS 27); macOS's `kevent(2)` promises no order, so no more is claimed. The errno when the wait fails,
+or EINVAL (22) when `kq` gave an event that is not a signal's: `kq` holds signal
+watches only. -/
+def nextSignal (kq : UInt32) : IO (Except UInt32 UInt32) := do
+  let r ← nextSignalRaw kq
+  return if r &&& ((1 : UInt64) <<< 63) == 0 then .ok r.toUInt32 else .error (r &&& 0xffffffff).toUInt32
 
 /-- Opens `path` for events only and watches it for writes, growth, deletion and
 renames, tagged with `tag` (0 or not: `kqWait` tells the two apart); the
