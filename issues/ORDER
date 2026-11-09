@@ -1,6 +1,5 @@
 ## Next, in order
 
-tuvst2 lean-posix: diagnostic, does trySpawn's fork fail in a multithreaded Lean process while other threads are inside libSystem
 zcyzdk lean-posix: move the termCtl handler and terminal state into a C file built by Lake, with system headers and _Static_assert checks
 atn2r3 lean-posix: move the Kqueue bindings into the C file, with <sys/event.h> instead of hand-declared struct kevent
 ot2tus lean-posix: move the Pty, Fd and Lock bindings into the C file, with real termios, winsize, stat and fcntl declarations
@@ -15,5 +14,7 @@ x3fn73 lean-posix: typed results for watch, openEvents and watchSession
 umpom4 lean-posix: kqWait and kqWaitFor give a record of events instead of a bit mask
 
 ## Proposed
+
+2kfkur lean-posix: note for 53zc6j: trySpawn's fork kills children before exec in a multithreaded Lean process (tuvst2 result)
 
 ## Needs a decision
