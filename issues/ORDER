@@ -2,6 +2,7 @@
 
 wnex37 termCtl's signal handler is called through a cast function pointer type
 2aeepb termCtl op 1001 ignores SIGTSTP (18), while its doc says SIGCONT
+smisrg lean-posix: openPty's slave is inherited by every child, so a spawn in another thread before the caller closes it keeps the pty open
 
 ## Proposed
 
@@ -9,6 +10,5 @@ k3dley lean-posix: results encoded as high bits or "large numbers" as Except val
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 abcwsi lean-posix: confirm the two assumptions behind the lockDir EINTR test
-smisrg lean-posix: openPty's slave is inherited by every child, so a spawn in another thread before the caller closes it keeps the pty open
 
 ## Needs a decision
