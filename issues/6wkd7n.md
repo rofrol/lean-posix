@@ -1,0 +1,3 @@
+lean-posix: record here the owner's ruling that its history may be rewritten and rr2's pin tags moved
+
+The owner's ruling of 2026-11-09 that lean-posix's history may be rewritten and rr2's `pin/*` tags here moved (an exception to AGENTS.md Rule 6, "pin/* tags are never moved or deleted"; rr's pins not covered) is recorded only in rr2's DECISIONS.md. An agent working in lean-posix reads only this repository's files, so it follows Rule 6 here and would refuse to move a tag. Question for the owner: should the ruling's home be a DECISIONS.md in lean-posix (with rr2's entry linking to it), or stay in rr2 only? Item o3bkwn did not create DECISIONS.md because its task limited the search to this repository's git log and README and asked for no reference to rr2 files.
