@@ -14,7 +14,7 @@ namespace Posix
 terminal as found: expanded only in `termOps`, which is why it is private. The
 numbers are macOS's: TCSANOW 0, SA_RESETHAND | SA_NODEFER 0x14, signal 18 and
 SIG_IGN 1, and the signals that end a process and can be caught. Signal 18 is
-SIGTSTP on macOS (SIGCONT is 19), though op 1001's doc calls it SIGCONT.
+SIGTSTP on macOS.
 
 The handler op 1001 installs is `termOps` itself, by its C name: a function of
 `uint32_t` to `uint32_t` whose body is only this expression, so a signal runs
@@ -56,7 +56,9 @@ private opaque termRaw (op : UInt32) : IO UInt32
   started by `execResume` does not know how its predecessor entered it), and puts
   the terminal back as found;
 - 1001 installs a handler of every signal that ends a process and
-  can be caught, and ignores SIGCONT;
+  can be caught, and ignores SIGTSTP (so `kill -TSTP` cannot stop the program with
+  the terminal raw); an ignored signal survives exec, so a child started after it
+  inherits SIGTSTP ignored unless it calls `Posix.defaultSignals` first;
 - 1003 puts the terminal as found into the environment, as `LEAN_POSIX_TERMIOS` in
   hex, for the next build `execResume` starts (1 when the full screen was not
   entered), and 1004 takes it out again when that build did not start;

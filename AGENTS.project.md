@@ -86,7 +86,7 @@ module imports another; nothing here imports a consumer. The tests import
 - Privileged or process-wide effects: `exec`/`execResume` replace the
   process; `killNow` and `kill` signal any pid or group the caller names;
   `catchSignals` catches the signals it is given process-wide with a no-op handler; `termCtl`
-  installs handlers for every catchable terminating signal, ignores SIGCONT,
+  installs handlers for every catchable terminating signal, ignores SIGTSTP,
   changes stdin's termios and writes escape sequences to stdout;
   `defaultSignals`/`defaultPipe` change signal dispositions; `trySpawn`
   forks, and its child calls only async-signal-safe functions before exec.

@@ -4,7 +4,7 @@
 Lean's `IO.Process` spawns and waits; it cannot become another program in the same
 process, kill a process group, or put signals back to their defaults. The numbers
 are macOS's: SIGHUP 1, SIGINT 2, SIGQUIT 3, SIGKILL 9, SIGPIPE 13, SIGTERM 15,
-ESRCH 3, EPERM 1, EINVAL 22,
+SIGTSTP 18, ESRCH 3, EPERM 1, EINVAL 22,
 RUSAGE_SELF 0, PROC_PIDTBSDINFO 3; `struct proc_bsdinfo` is 136 bytes, its
 `pbi_start_tvsec` and `pbi_start_tvusec` at 120 and 128.
 -/
@@ -40,9 +40,10 @@ opaque kill (pid : Int32) (sig : UInt32) : IO UInt32
 @[extern c inline "({ extern unsigned alarm(unsigned); alarm(#1); lean_io_result_mk_ok(lean_box(0)); })"]
 opaque alarm (seconds : UInt32) : IO Unit
 
-/-- The defaults of SIGHUP, SIGINT, SIGQUIT, SIGPIPE and SIGTERM, for a child before
-it executes its command: an ignored signal survives exec, and Lean ignores SIGPIPE. -/
-@[extern c inline "({ extern void (*signal(int, void (*)(int)))(int); int s[] = {1, 2, 3, 13, 15}; for (int i = 0; i < 5; i++) signal(s[i], 0); lean_io_result_mk_ok(lean_box(0)); })"]
+/-- The defaults of SIGHUP, SIGINT, SIGQUIT, SIGPIPE, SIGTERM and SIGTSTP, for a child
+before it executes its command: an ignored signal survives exec, Lean ignores SIGPIPE,
+and `termCtl 1001` ignores SIGTSTP. -/
+@[extern c inline "({ extern void (*signal(int, void (*)(int)))(int); int s[] = {1, 2, 3, 13, 15, 18}; for (int i = 0; i < 6; i++) signal(s[i], 0); lean_io_result_mk_ok(lean_box(0)); })"]
 opaque defaultSignals : IO Unit
 
 /-- The default of SIGPIPE alone, for a process about to execute another program in

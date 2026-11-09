@@ -243,6 +243,17 @@ a handler that returns without SA_RESTART. `struct sigaction` as macOS lays it o
 @[extern c inline "({ extern int sigaction(int, const void*, void*); extern int* __error(void); struct { void (*h)(int); unsigned m; int f; } a; unsigned r = 0; if (sigaction((int)#1, 0, &a) != 0) r = (unsigned)*__error(); else { a.f &= ~2; if (sigaction((int)#1, &a, 0) != 0) r = (unsigned)*__error(); } lean_io_result_mk_ok(lean_box_uint32(r)); })"]
 opaque noRestart (sig : UInt32) : IO UInt32
 
+/-- `disposition`'s code: 0, 1 or 2, or 1000 plus the errno. -/
+@[extern c inline "({ extern int sigaction(int, const void*, void*); extern int* __error(void); struct { void (*h)(int); unsigned m; int f; } a; uint32_t r; if (sigaction((int)#1, 0, &a) != 0) r = 1000u + (unsigned)*__error(); else r = a.h == (void (*)(int))0 ? 0u : a.h == (void (*)(int))1 ? 1u : 2u; lean_io_result_mk_ok(lean_box_uint32(r)); })"]
+opaque dispositionRaw (sig : UInt32) : IO UInt32
+
+/-- What signal `sig` does in this process, as `sigaction` reads it: "dfl" for its
+default (SIG_DFL, 0), "ign" when ignored (SIG_IGN, 1), "caught" for a handler, or
+the errno. -/
+def disposition (sig : UInt32) : IO String := do
+  return match ← dispositionRaw sig with
+    | 0 => "dfl" | 1 => "ign" | 2 => "caught" | e => s!"errno {e - 1000}"
+
 /-- The calling thread's `pthread_t`, for `signalThread`. -/
 @[extern c inline "({ extern void* pthread_self(void); lean_io_result_mk_ok(lean_box_uint64((uint64_t)pthread_self())); })"]
 opaque thisThread : IO UInt64
@@ -701,6 +712,20 @@ def term (t : T) : IO Unit := do
   let (out, code) ← onPty "term-motion-signal"
   t.check "a signal leaves any-motion reports off and the pointer shape reset"
     (code == .signaled 15 && contains out motionOn && contains out leaveAll && !contains out "survived") s!"{repr code} {out.quote}"
+  -- In a child, as op 1001 changes this process's signals. The child starts from
+  -- SIGTSTP (18) at its default through `defaultSignals`, and SIGCONT (19) as it
+  -- inherited it: op 1001 ignores SIGTSTP, catches SIGTERM (15) and leaves SIGCONT
+  -- as it was; then `defaultSignals` puts SIGTSTP back, as an ignored signal
+  -- survives exec into a command.
+  let out ← IO.Process.output { cmd := (← IO.appPath).toString, args := #["term-dispositions"] }
+  let ok := match out.stdout.splitOn "\n" with
+    | [before, l1001, lDefault, ""] =>
+      let c := before.drop "before 18 dfl 19 ".length |>.toString
+      before == s!"before 18 dfl 19 {c}"
+        && l1001 == s!"1001 18 ign 19 {c} 15 caught" && lDefault == s!"defaultSignals 18 dfl 19 {c}"
+    | _ => false
+  t.check "termCtl 1001 ignores SIGTSTP, leaves SIGCONT alone, and defaultSignals puts SIGTSTP back"
+    (out.exitCode == 0 && ok) s!"{out.exitCode} {out.stdout.quote}"
 
 def main (args : List String) : IO UInt32 := do
   match args with
@@ -801,6 +826,14 @@ def main (args : List String) : IO UInt32 := do
     if (← termEnter (motion := true)) != 0 then return 3
     discard <| IO.Process.output { cmd := "kill", args := #["-TERM", toString (← IO.Process.getPID)] }
     IO.print "survived"
+    return 0
+  | ["term-dispositions"] =>
+    defaultSignals
+    IO.print s!"before 18 {← disposition 18} 19 {← disposition 19}\n"
+    discard <| termCtl 1001
+    IO.print s!"1001 18 {← disposition 18} 19 {← disposition 19} 15 {← disposition 15}\n"
+    defaultSignals
+    IO.print s!"defaultSignals 18 {← disposition 18} 19 {← disposition 19}\n"
     return 0
   | ["term-signal"] =>
     discard <| termCtl 1001
