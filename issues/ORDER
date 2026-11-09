@@ -1,6 +1,7 @@
 ## Next, in order
 
 tuvst2 lean-posix: diagnostic, does trySpawn's fork fail in a multithreaded Lean process while other threads are inside libSystem
+zcyzdk lean-posix: move the termCtl handler and terminal state into a C file built by Lake, with system headers and _Static_assert checks
 
 ## Proposed
 
@@ -18,5 +19,3 @@ x3fn73 lean-posix: typed results for watch, openEvents and watchSession
 umpom4 lean-posix: kqWait and kqWaitFor give a record of events instead of a bit mask
 
 ## Needs a decision
-
-zcyzdk lean-posix: move the termCtl handler and terminal state into a C file built by Lake, with system headers and _Static_assert checks
