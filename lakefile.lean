@@ -13,3 +13,10 @@ lean_lib Posix
 lean_exe tests where
   srcDir := "Tests"
   root := `Main
+
+/-- `lake exe spawnstress ROUNDS SPAWNS THREADS`: a diagnostic stress run of
+`trySpawn` while other threads call into libSystem, not a test
+(`Diag/SpawnStress.lean`). -/
+lean_exe spawnstress where
+  srcDir := "Diag"
+  root := `SpawnStress

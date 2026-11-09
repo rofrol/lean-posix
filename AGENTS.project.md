@@ -114,6 +114,11 @@ Other users, if any, are not known here.
   children it starts on a pty (`tests term`, `tests term-signal`); the exit
   status is the number of failures. Some tests run system programs (for
   example `stat(1)`) to compare results.
+- `lake exe spawnstress ROUNDS SPAWNS THREADS [KIND,...]`
+  (`Diag/SpawnStress.lean`): a diagnostic stress run of `trySpawn` in fresh
+  processes whose other threads call into libSystem, counting each child's
+  outcome; not a test, and not run by `lake test`. Its exit status is 1 when
+  any spawn did not reach its exec and exit 0.
 
 ## Types for lifecycles and invariants (Lean)
 
