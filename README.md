@@ -17,7 +17,7 @@ their shells hold no C of their own.
 | `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, `alarm`, default signals before exec, a process's start time (`proc_pidinfo`), peak RSS |
 | `Posix.Spawn`   | a spawn that says whether its exec failed (fork, a close-on-exec pipe for the exec's result, `execve` along PATH), in a session of its own on a controlling terminal if asked, `pipe`, `waitpid`, a write of every byte |
 | `Posix.Lock`    | exclusive `flock` on a file or a directory, such a lock handed to the next program this process executes (`fstat`, `stat`), `link` that fails on a taken name |
-| `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; the exits of processes that need not be children; stdin, SIGWINCH, files and exits of processes for a full-screen program |
+| `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; the exits of processes that need not be children; stdin, SIGWINCH, files and exits of processes for a full-screen program, waited for with or without a timeout |
 | `Posix.Term`    | a full-screen terminal in raw mode, restored on every exit and signal that can be caught, and handed to a new build across `exec` |
 
 ## Why not `Std.Internal.UV`
@@ -53,7 +53,7 @@ so it stays fetchable.
 runs each binding against the system: a file read by device, inode and offset as it is appended to, truncated in place and replaced by rename, a pty, locks, a lock handed across exec, links, kqueue events of a
 process, its pipe, a directory and files, the exits of processes watched
 while alive, after their exit and after their reaping, on their own kqueue and a full-screen
-program's, processes' start times, exec, kill, spawns that
+program's, a full-screen program's wait that times out with nothing and one an event ends first, processes' start times, exec, kill, spawns that
 run and spawns whose exec or setup fails, each with its errno, and the terminal's full
 screen entered, left, and left on a signal, in children on a pty.
 

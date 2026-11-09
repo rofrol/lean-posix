@@ -301,6 +301,18 @@ def kqView (t : T) (dir : System.FilePath) : IO Unit := do
   let fd2 ← watch k other.toString 1
   let (none_, _) ← kqWait k true
   t.check "kqWait with poll and nothing new" (none_ == 0) s!"{none_}"
+  -- A wait with a timeout and nothing to report returns 0 once the time has passed.
+  let t0 ← IO.monoMsNow
+  let (m, changed, exited) ← kqWaitFor k 50
+  let took := (← IO.monoMsNow) - t0
+  t.check "kqWaitFor with nothing new gives 0 and nothing"
+    (m == 0 && changed.isEmpty && exited.isEmpty) s!"{m} {changed} {exited}"
+  t.check "kqWaitFor waits its time out" (took >= 50) s!"{took} ms"
+  -- An event that comes before the time is up is reported.
+  IO.FS.withFile file .append (·.putStr "x")
+  let (m, changed, _) ← kqWaitFor k 60000
+  t.check "kqWaitFor reports an event that comes first" (m == 4 && changed == #[fd])
+    s!"{m} {changed}"
   IO.FS.withFile file .append (·.putStr "x")
   IO.FS.withFile other .append (·.putStr "x")
   let (m, changed, exited) ← kqWait k true
