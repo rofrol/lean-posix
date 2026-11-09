@@ -13,6 +13,7 @@ mnksgg lean-posix: the lockDir EINTR test cannot tell lf_setlock's abort-safe sl
 tuvst2 lean-posix: diagnostic, does trySpawn's fork fail in a multithreaded Lean process while other threads are inside libSystem
 quboep lean-posix: design how 53zc6j's ctty helper executable is built, shipped and found by consumers
 x3fn73 lean-posix: typed results for watch, openEvents and watchSession
+7gq47o lean-posix: typed results for openPty, loginTty, lockDir and the Lock raw declarations
 
 ## Needs a decision
 
