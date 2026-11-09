@@ -7,11 +7,11 @@ ot2tus lean-posix: move the Pty, Fd and Lock bindings into the C file, with real
 vq7btc lean-posix: move the Process bindings into the C file, with <libproc.h> and <signal.h>
 mtobhv lean-posix: move Spawn's pipe, waitpid, waitStatus and writeAll into the C file; spawnRaw waits for 53zc6j
 quboep lean-posix: design how 53zc6j's ctty helper executable is built, shipped and found by consumers
+53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 
 ## Proposed
 
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
-53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 mnksgg lean-posix: the lockDir EINTR test cannot tell lf_setlock's abort-safe sleep from another interruptible wait inside flock
 x3fn73 lean-posix: typed results for watch, openEvents and watchSession
 7gq47o lean-posix: typed results for openPty, loginTty, lockDir and the Lock raw declarations
