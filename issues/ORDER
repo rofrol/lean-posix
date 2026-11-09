@@ -1,6 +1,5 @@
 ## Next, in order
 
-jd6rjr lean-posix: openPty's master is made close-on-exec only after openpty returns, so a fork in another thread can inherit it
 6wkd7n lean-posix: record here the owner's ruling that its history may be rewritten and rr2's pin tags moved
 
 ## Proposed
@@ -11,5 +10,6 @@ gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the 
 wnex37 termCtl's signal handler is called through a cast function pointer type
 2aeepb termCtl op 1001 ignores SIGTSTP (18), while its doc says SIGCONT
 abcwsi lean-posix: confirm the two assumptions behind the lockDir EINTR test
+smisrg lean-posix: openPty's slave is inherited by every child, so a spawn in another thread before the caller closes it keeps the pty open
 
 ## Needs a decision
