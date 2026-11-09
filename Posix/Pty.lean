@@ -9,21 +9,27 @@ shorts, rows first.
 
 namespace Posix
 
-/-- A raw terminal, so it neither turns \n into \r\n nor echoes: the master,
-which no child inherits, and the slave, which every child inherits until it is
-closed. The master is close-on-exec from the moment it is opened: no program a
-child executes has it open, not even a child another thread starts while
-`openPty` runs (a forked child holds it only until its exec). `cfmakeraw` fills
-a `struct termios`, which fits in the buffer. Both are large numbers when no pty
-can be had.
+/-- A raw terminal, so it neither turns \n into \r\n nor echoes: the master
+and the slave, which no child inherits. Both are close-on-exec from the moment
+they are opened: no program a child executes has either open, not even a child
+another thread starts while `openPty` runs or before the caller closes the slave
+(a forked child holds them only until its exec), so the master sees the end of
+the slave once the caller has closed its copies and the children it gave the
+slave are gone. To give a child the slave, make it the child's 0, 1 or 2
+(`spawn ... s s s`, which clears close-on-exec even on a slave that is already
+that number, or a `dup2` onto another number, which leaves the copy without it).
+`loginTty` in a forked child dup2s it onto 0, 1 and 2, so a slave that is itself
+0, 1 or 2 (stdio closed before `openPty`) stays close-on-exec at that number.
+`cfmakeraw` fills a `struct termios`, which fits in the buffer. Both are large
+numbers when no pty can be had.
 
 The steps are `openpty`'s, but the master is opened by `posix_openpt` with
-O_CLOEXEC, which POSIX.1-2024 specifies for it, rather than made close-on-exec
-by a later `fcntl`. macOS's grantpt(3) lists only O_RDWR and O_NOCTTY and
-returns EINVAL for "an invalid mode bit", so a system that refused O_CLOEXEC
+O_CLOEXEC, which POSIX.1-2024 specifies for it, and the slave by `open` with
+O_CLOEXEC, rather than made close-on-exec by a later `fcntl`. macOS's
+grantpt(3) lists only O_RDWR and O_NOCTTY and returns EINVAL for "an invalid mode bit", so a system that refused O_CLOEXEC
 would make `openPty` fail rather than hand out a master a program inherits.
-`lake test` checks that a child's program has the slave and not the master. -/
-@[extern c inline "({ extern int posix_openpt(int); extern int grantpt(int); extern int unlockpt(int); extern int ptsname_r(int, char*, unsigned long); extern int open(const char*, int, ...); extern int close(int); extern void cfmakeraw(void*); extern int tcsetattr(int, int, const void*); unsigned long t[32] = {0}; cfmakeraw(t); char name[128]; int s = -1; int m = posix_openpt(0x2 | 0x20000 | 0x1000000); if (m >= 0 && (grantpt(m) != 0 || unlockpt(m) != 0 || ptsname_r(m, name, sizeof name) != 0 || (s = open(name, 0x2 | 0x20000)) < 0 || tcsetattr(s, 2, t) != 0)) { if (s >= 0) close(s); close(m); m = -1; s = -1; } lean_object* p = lean_alloc_ctor(0, 2, 0); lean_ctor_set(p, 0, lean_box_uint32((unsigned)m)); lean_ctor_set(p, 1, lean_box_uint32((unsigned)s)); lean_io_result_mk_ok(p); })"]
+`lake test` checks that a child's program has neither. -/
+@[extern c inline "({ extern int posix_openpt(int); extern int grantpt(int); extern int unlockpt(int); extern int ptsname_r(int, char*, unsigned long); extern int open(const char*, int, ...); extern int close(int); extern void cfmakeraw(void*); extern int tcsetattr(int, int, const void*); unsigned long t[32] = {0}; cfmakeraw(t); char name[128]; int s = -1; int m = posix_openpt(0x2 | 0x20000 | 0x1000000); if (m >= 0 && (grantpt(m) != 0 || unlockpt(m) != 0 || ptsname_r(m, name, sizeof name) != 0 || (s = open(name, 0x2 | 0x20000 | 0x1000000)) < 0 || tcsetattr(s, 2, t) != 0)) { if (s >= 0) close(s); close(m); m = -1; s = -1; } lean_object* p = lean_alloc_ctor(0, 2, 0); lean_ctor_set(p, 0, lean_box_uint32((unsigned)m)); lean_ctor_set(p, 1, lean_box_uint32((unsigned)s)); lean_io_result_mk_ok(p); })"]
 opaque openPty : IO (UInt32 × UInt32)
 
 /-- A new session with `fd`, a terminal, as its controlling terminal and stdio: 0,

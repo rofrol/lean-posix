@@ -168,30 +168,33 @@ def childFds (limit : Nat) : IO (List Nat) := do
   discard <| waitpid pid
   return (out.trimAscii.toString.splitOn " ").filterMap String.toNat?
 
-/-- What a child inherits of the descriptors made here: only `openPty`'s slave,
-which is not close-on-exec; not the master, a kqueue, a lock's descriptor or a
-pipe. Descriptors this process got from whoever started it do not count. -/
+/-- What a child inherits of the descriptors made here: none, neither
+`openPty`'s master nor its slave, a kqueue, a lock's descriptor or a pipe.
+Descriptors this process got from whoever started it do not count. A copy of
+the slave with close-on-exec cleared, as `dup2` makes, shows that the child
+reports what it inherits. -/
 def inherited (t : T) (dir : System.FilePath) : IO Unit := do
   let (m, s) ← openPty
   let k ← kqOpen
   let (pr, pw) ← Posix.pipe
+  let d ← dupPrivate s
+  dup2 s d
   match ← lockFile (dir / "inherited") false with
-  | .error e => t.check "lockFile takes a lock" false s!"{e}"
+  | .error e => t.check "lockFile takes a lock" false s!"{e}"; close d
   | .ok lk =>
     let ours := [m, s, k, lk, pr, pw].map (·.toNat)
-    let limit := ours.foldl max 0 + 1
+    let limit := (d :: [m, s, k, lk, pr, pw]).foldl (fun a x => max a x.toNat) 0 + 1
     let after ← childFds limit
-    -- The baseline: a child started once the slave is closed, which has what this
-    -- process got from whoever started it, and any of ours that leaked.
-    let closedHere := ours.filter (· != s.toNat)
-    close s
+    -- The baseline: a child started once the inheritable copy is closed, which has
+    -- what this process got from whoever started it, and any of ours that leaked.
+    close d
     let without ← childFds limit
-    t.check "a child inherits the slave of openPty and none of the master, a kqueue, a lock or a pipe"
-      (after.contains s.toNat && !without.contains s.toNat
-        && closedHere.all (!after.contains ·) && after.filter (· != s.toNat) == without)
-      s!"with the slave {after}, without {without}; master {m} slave {s} kqueue {k} lock {lk} pipe {pr} {pw}"
+    t.check "a child inherits none of openPty's master and slave, a kqueue, a lock or a pipe, but a copy dup2 made"
+      (after.contains d.toNat && !without.contains d.toNat
+        && ours.all (!after.contains ·) && after.filter (· != d.toNat) == without)
+      s!"with the copy {after}, without {without}; master {m} slave {s} copy {d} kqueue {k} lock {lk} pipe {pr} {pw}"
     unlock lk
-  close pr; close pw; close k; close m
+  close s; close pr; close pw; close k; close m
 
 /-- The exit status of `tests lock-handed PATH FD` with `fd`, and `open` (a shell
 redirection) before it: 0 once it took over the lock, else the errno or 255. -/
