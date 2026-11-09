@@ -1,0 +1,3 @@
+lean-posix: spawnRaw and processStartRaw private
+
+Split out of k3dley. Order decided with the models on 2026-11-09 after the owner approved every item (consult round 20261109-174629-3483, sol and argon; checked by the session). Signature-changing, so after every C move. Make `spawnRaw` (or what 53zc6j left) and `processStartRaw` private, `trySpawn` and `processStart` being their typed forms. Each consumer moves its pin in its own queue; the commit message lists the changed declarations for them. Clean break, no old API kept (decided with the models: no outside users). Pure decoder theorems are optional: they prove Lean properties, not the C. Check: `lake test`.
