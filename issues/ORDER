@@ -1,6 +1,5 @@
 ## Next, in order
 
-wnex37 termCtl's signal handler is called through a cast function pointer type
 2aeepb termCtl op 1001 ignores SIGTSTP (18), while its doc says SIGCONT
 smisrg lean-posix: openPty's slave is inherited by every child, so a spawn in another thread before the caller closes it keeps the pty open
 abcwsi lean-posix: confirm the two assumptions behind the lockDir EINTR test
