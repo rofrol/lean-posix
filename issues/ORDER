@@ -8,6 +8,7 @@ k3dley lean-posix: results encoded as high bits or "large numbers" as Except val
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 atn2r3 lean-posix: move the Kqueue bindings into the C file, with <sys/event.h> instead of hand-declared struct kevent
+ot2tus lean-posix: move the Pty, Fd and Lock bindings into the C file, with real termios, winsize, stat and fcntl declarations
 
 ## Needs a decision
 
