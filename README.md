@@ -12,7 +12,7 @@ their shells hold no C of their own.
 
 | Module          | What                                                              |
 | --------------- | ----------------------------------------------------------------- |
-| `Posix.Fd`      | `dup`, `dup2`, `close`, `read`, `pread`, a pipe drained without waiting, the descriptor under a `Handle`, `isatty`, `strerror`, a file's times (`utimes`) |
+| `Posix.Fd`      | `dup`, `dup2`, `close`, `read`, `pread`, a pipe drained without waiting, the descriptor under a `Handle`, `isatty`, `strerror`, a file's times (`utimes`), a file's device, inode, size and bytes from an offset, on one descriptor (`fstat`, `pread`) |
 | `Posix.Pty`     | a raw pty (`openpty`), `login_tty`, the window size, read and set  |
 | `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, `alarm`, default signals before exec, a process's start time (`proc_pidinfo`), peak RSS |
 | `Posix.Spawn`   | a spawn that says whether its exec failed (fork, a close-on-exec pipe for the exec's result, `execve` along PATH), in a session of its own on a controlling terminal if asked, `pipe`, `waitpid`, a write of every byte |
@@ -50,7 +50,7 @@ so it stays fetchable.
 
     lake test
 
-runs each binding against the system: a pty, locks, a lock handed across exec, links, kqueue events of a
+runs each binding against the system: a file read by device, inode and offset as it is appended to, truncated in place and replaced by rename, a pty, locks, a lock handed across exec, links, kqueue events of a
 process, its pipe, a directory and files, the exits of processes watched
 while alive, after their exit and after their reaping, on their own kqueue and a full-screen
 program's, processes' start times, exec, kill, spawns that

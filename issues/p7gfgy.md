@@ -1,5 +1,0 @@
-Fd: read a file's device, inode, size and bytes from an offset, on one descriptor
-
-Asked by rr2 (its issue 4uai7q; the owner approved the option "lean-posix binding" on 2026-11-09). rr2 reads the part of consult's `~/.local/state/consult/rounds.jsonl` appended since a run started, and must notice a file replaced or truncated in place in between. Neither Lean core's `IO.FS.Metadata` (nightly-2026-10-25) nor lean-posix exposes `st_dev`/`st_ino` (only a private `stat64` inside `Posix.lockHanded`), and `Posix.readAt` opens by path, so a separate stat races with the read. Wanted: a binding that opens the path once, `fstat`s that descriptor for `st_dev`, `st_ino` and `st_size`, and `pread`s from a given offset on it, returning (dev, ino, size, bytes), with no such file as a distinct result; with a test on a real file (appended, truncated in place, replaced by rename).
-
-Base it on b68e7e2a3f48 like csgol3 and push a `pin/<sha12>` tag for the result; csgol3 may share the same commit and tag. The same request is queued in rr as pdnpx7 (rr commit e682fd3); one of the two is dropped once this lands.

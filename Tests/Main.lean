@@ -57,6 +57,50 @@ def fds (t : T) (dir : System.FilePath) : IO Unit := do
   t.check "to the millisecond" (mt.sec == 1700000000 && mt.nsec == 123000000) s!"{mt.sec} {mt.nsec}"
   t.check "setTimes of no file is its errno" ((← setTimes (dir / "none").toString 0) == 2)
 
+/-- The device and inode of `path` as `stat(1)` says them. -/
+def statId (path : System.FilePath) : IO (UInt32 × UInt64) := do
+  let out ← IO.Process.output { cmd := "/usr/bin/stat", args := #["-f", "%d %i", path.toString] }
+  match (out.stdout.trimAscii.toString.splitOn " ").map String.toNat? with
+  | [some d, some i] => return (d.toUInt32, i.toUInt64)
+  | _ => throw (IO.userError s!"stat said {out.stdout.quote}")
+
+def fileAt (t : T) (dir : System.FilePath) : IO Unit := do
+  let file := dir / "log"
+  IO.FS.writeFile file "0123456789"
+  let id0 ← statId file
+  let some a := (← readFileAt file 2 3).toOption
+    | t.check "readFileAt of a file reads it" false
+  t.check "readFileAt reads from an offset" (text a.bytes == "234") (text a.bytes).quote
+  t.check "with the file's size" (a.size == 10) s!"{a.size}"
+  t.check "with its device and inode" ((a.dev, a.ino) == id0) s!"{(a.dev, a.ino)} {id0}"
+  let h ← IO.FS.Handle.mk file .append
+  h.putStr "abc"
+  h.flush
+  let some b := (← readFileAt file 10 100).toOption
+    | t.check "readFileAt of an appended file reads it" false
+  t.check "appended: the same file, grown, its new bytes"
+    ((b.dev, b.ino) == id0 && b.size == 13 && text b.bytes == "abc") s!"{b.size} {text b.bytes}"
+  IO.FS.writeFile file "01"
+  let some c := (← readFileAt file 10 100).toOption
+    | t.check "readFileAt of a truncated file reads it" false
+  t.check "truncated in place: the same file, smaller than the offset, no bytes"
+    ((c.dev, c.ino) == id0 && c.size == 2 && c.bytes.size == 0) s!"{c.size} {c.bytes.size}"
+  let other := dir / "log.new"
+  IO.FS.writeFile other "replaced, longer"
+  let id1 ← statId other
+  IO.FS.rename other file
+  let some d := (← readFileAt file 0 8).toOption
+    | t.check "readFileAt of a replaced file reads it" false
+  t.check "replaced by rename: another inode, the new file's size and bytes"
+    (d.ino != a.ino && (d.dev, d.ino) == id1 && d.size == 16 && text d.bytes == "replaced")
+    s!"{(d.dev, d.ino)} {id1} {d.size} {text d.bytes}"
+  let none_ ← readFileAt (dir / "none") 0 3
+  t.check "readFileAt of no file is noSuchFile"
+    (match none_ with | .error e => e == noSuchFile | .ok _ => false)
+  let isDir ← readFileAt dir 0 3
+  t.check "readFileAt of a directory is EISDIR"
+    (match isDir with | .error e => e == 21 | .ok _ => false)
+
 /-- What `fd` gives until it holds `n` lines or ends, in at most 100 reads. -/
 def linesOf (fd : UInt32) (n : Nat) : IO String := do
   let mut acc := ByteArray.empty
@@ -512,6 +556,7 @@ def main (args : List String) : IO UInt32 := do
   let dir ← IO.FS.createTempDir
   try
     fds t dir
+    fileAt t dir
     pty t
     locks t dir
     kq t dir
