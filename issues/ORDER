@@ -7,7 +7,6 @@ vmzqho lean-posix: the kq test hangs when the process's exit comes before its ou
 6wkd7n lean-posix: record here the owner's ruling that its history may be rewritten and rr2's pin tags moved
 k3dley lean-posix: results encoded as high bits or "large numbers" as Except values
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
-iafpuo lean-posix: decide whether waitOutcome should report a traced child's stop instead of passing it by
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 jd6rjr lean-posix: openPty's master is made close-on-exec only after openpty returns, so a fork in another thread can inherit it
 nhg7tl lean-posix: lockDir gives up when a signal interrupts its blocking flock
