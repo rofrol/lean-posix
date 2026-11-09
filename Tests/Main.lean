@@ -268,43 +268,78 @@ EVFILT_SIGNAL does not see it. -/
 @[extern c inline "({ extern int pthread_kill(void*, int); lean_io_result_mk_ok(lean_box_uint32((unsigned)pthread_kill((void*)#1, (int)#2))); })"]
 opaque signalThread (thread : UInt64) (sig : UInt32) : IO UInt32
 
-/-- Whether every thread of `pid` sleeps, as `ps -M` reads the kernel's process
-table, read up to `n` times until it does (interval: none; each read is the next
-`ps` run, the kernel's thread states being the producer); false at once when `ps`
-fails or its header has no STAT column. The STAT column starts where its header
-does: `ps` sizes the columns over all rows, and a thread's row leaves USER and TT
-blank. -/
-def sleepsWithin (pid : UInt32) : Nat → IO Bool
-  | 0 => return false
-  | n + 1 => do
-    let out ← IO.Process.output { cmd := "/bin/ps", args := #["-M", "-p", toString pid] }
-    match (out.stdout.splitOn "\n").filter (!·.isEmpty) with
-    | header :: threads =>
-      match header.splitOn "STAT" with
-      | before :: _ :: _ =>
-        if out.exitCode != 0 then return false
-        let states := threads.map fun l => (l.drop before.length).take 1 |>.toString
-        if !states.isEmpty && states.all (· == "S") then return true
-        sleepsWithin pid n
-      | _ => return false
-    | [] => return false
+/-- Whether the thread `thread` (a `pthread_t`) of this process has entered the
+`flock` system call and waits there in a wait that is not uninterruptible: 1 when
+it does, 0 when it does not, and the high bit set with the Mach error when
+`thread_get_state` or `thread_info` fails. arm64 only: elsewhere flavor 6 is
+another, smaller register set, the buffers start zeroed, and the result is 0.
+
+Two reads of the kernel's thread, in this order. `thread_get_state(ARM_THREAD_STATE64
+= 6, 68 words)` gives the user registers saved on entry to the kernel, whose `x16`
+holds the number of the system call the thread made, 131 for `flock`
+(`bsd/kern/syscalls.master` 209; `libsystem_kernel`'s `flock` is `mov x16, #0x83`
+then `svc #0x80`, as lldb disassembles it); so the thread has entered `flock`
+(unless user code left 131 in `x16`, a scratch register, and then faulted into a
+wait), and a caller that knows `flock` cannot have returned knows it is still
+inside. Then
+`thread_info(THREAD_BASIC_INFO = 3)` gives its `run_state`, which XNU sets to
+`TH_STATE_WAITING` (3) only for a thread that waits, is not running and is not in
+an uninterruptible wait (`osfmk/kern/thread.c` 2047-2057). It does not tell an
+abort-safe wait from a merely interruptible one, nor name the wait channel, which
+XNU does not export (no `wmesg` in `bsd/kern/kern_sysctl.c` or
+`bsd/kern/proc_info.c`). Reading another thread's state holds and stops it but
+leaves its wait as it is (`osfmk/kern/thread_act.c` `thread_get_state_internal`;
+`thread_stop` and `thread_unstop` only set and clear `TH_SUSP`). -/
+@[extern c inline "({ extern unsigned pthread_mach_thread_np(void*); extern int thread_info(unsigned, int, int*, unsigned*); extern int thread_get_state(unsigned, int, unsigned*, unsigned*); unsigned th = pthread_mach_thread_np((void*)#1); int info[10] = {0}; unsigned n = 10; unsigned long long st[34] = {0}; unsigned m = 68; int kr = thread_get_state(th, 6, (unsigned*)st, &m); if (kr == 0) kr = thread_info(th, 3, info, &n); lean_io_result_mk_ok(lean_box_uint32(kr != 0 ? 0x80000000u | (unsigned)kr : (st[16] == 131 && info[6] == 3) ? 1u : 0u)); })"]
+opaque inFlock (thread : UInt64) : IO UInt32
+
+/-- `inFlock thread`, read up to `n` times until it is not 0 (interval: none; each
+read is the next pair of Mach calls, the kernel's thread state being the producer,
+which sends no event): its last result. -/
+def inFlockWithin (thread : UInt64) (n : Nat) : IO UInt32 := do
+  let mut r := 0
+  for _ in [0:n] do
+    r ← inFlock thread
+    if r != 0 then return r
+  return r
 
 /-- `lockDir` waits past a signal whose handler lacks SA_RESTART. A holder (`tests
 lock-dir-hold`) takes the directory's lock; a waiter (`tests lock-dir-signal`)
 catches SIGUSR1 (30) without SA_RESTART, says "ready" and blocks in `lockDir`.
 
-Its entry into the blocking `flock` cannot be observed: macOS's `ps` shows no wait
-channel. It is inferred from every thread of the waiter sleeping in the kernel's
-process table, as after "ready" its main thread makes no blocking call but
-`lockDir`'s `open` (of a directory) and `flock`; a sleep elsewhere before `flock`
-would let the signal come before `flock`, and the unfixed `lockDir` would then pass.
+On "go" the waiter's helper thread waits until `inFlock` sees its main thread
+waiting in `flock` (`flock` cannot return before the holder ends, which comes
+later), then sends it the signal with `pthread_kill` and says "sent"; the holder
+ends only then. When the main thread is not seen there within the bound, the
+helper says so and the test fails; it never signals early. By XNU's published
+source (xnu-12377.1.9, commit f6217f891ac0 of apple-oss-distributions/xnu; the
+running kernel's own source, xnu-13432, is not published):
 
-On "go" the waiter's helper thread sends the signal to its main thread and says
-"sent"; the holder ends only then. XNU marks an interruptible wait interrupted
-before `kill` returns (seen with a single-threaded `flock` waiter: the holder's end
-right after `kill` still gave EINTR); `pthread_kill` is taken to do the same, which
-XNU's source was not read to confirm. Were it not so, the unfixed `lockDir` could
-take the lock and pass; it failed this test with "gave up" in 5 runs of 5. -/
+- `__pthread_kill` calls `psignal_uthread` (`bsd/kern/kern_sig.c` 1141), whose
+  `psignal_internal` finds the signal caught (2212), goes to `runlocked` (2313,
+  2347) and calls `thread_abort_safely` (2560) before it returns.
+- For a thread in an abort-safe wait (`at_safe_point`), `thread_abort_safely`
+  calls `clear_wait_internal(thread, THREAD_INTERRUPTED)`
+  (`osfmk/kern/thread_act.c` 566-567), which takes the thread off its wait queue
+  and sets its wait result through `thread_go` (`osfmk/kern/sched_prim.c`
+  1655-1659), all before `pthread_kill` returns; the holder's end can no longer
+  wake it. `lf_setlock`'s sleep for a lock held elsewhere is such a wait: an
+  `msleep` with PCATCH, "lockf:np" (`bsd/kern/kern_lockf.c` 547, 774), which
+  `_sleep` makes THREAD_ABORTSAFE (`bsd/kern/kern_synch.c` 182-183). `_sleep` turns
+  THREAD_INTERRUPTED with a pending signal whose handler lacks SA_RESTART into
+  EINTR (`kern_synch.c` 292-299), and `lf_setlock` returns it (`kern_lockf.c`
+  814-823).
+- Not proven: that the wait `inFlock` sees is that one. `flock` reaches
+  `lf_setlock` through the file system's `VNOP_ADVLOCK` (here APFS, whose source is
+  not published), and `inFlock` cannot tell an abort-safe wait from another
+  interruptible one. In another such wait `thread_abort_safely` only marks the
+  thread aborted (`thread_act.c` 566-569), so its next abort-safe wait returns
+  interrupted at once (`sched_prim.c` 1059-1062, 1090-1097); but if the holder
+  ended before that, `lf_setlock` could take the lock without sleeping and the
+  unfixed `lockDir` would pass.
+
+The unfixed `lockDir` failed this test with "gave up" in 5 runs of 5, the main
+thread seen in `flock` each time. -/
 def lockDirSignal (t : T) (dir : System.FilePath) : IO Unit := do
   let d := dir / "dirlock"
   IO.FS.createDir d
@@ -315,11 +350,12 @@ def lockDirSignal (t : T) (dir : System.FilePath) : IO Unit := do
   let waiter ← IO.Process.spawn { cmd := self, args := #["lock-dir-signal", d.toString], stdin := .piped, stdout := .piped }
   let ready ← waiter.stdout.getLine
   t.check "the waiter catches SIGUSR1 without SA_RESTART" (ready == "ready\n") ready.quote
-  t.check "the waiter blocks in lockDir" (← sleepsWithin waiter.pid 1000)
+  t.check "inFlock says 0 for the calling thread, which runs" ((← inFlock (← thisThread)) == 0)
   waiter.stdin.putStrLn "go"
   waiter.stdin.flush
   let sent ← waiter.stdout.getLine
-  t.check "SIGUSR1 reaches the waiter's main thread" (sent == "sent 0\n") sent.quote
+  t.check "the waiter's main thread is seen asleep in flock, and SIGUSR1 reaches it"
+    (sent == "sent 0\n") sent.quote
   holder.stdin.putStrLn "go"
   holder.stdin.flush
   t.check "the holder ends" ((← holder.wait) == 0)
@@ -756,8 +792,12 @@ def main (args : List String) : IO UInt32 := do
     let stdout ← IO.getStdout
     let _ ← IO.asTask (prio := .dedicated) do
       discard <| stdin.getLine
-      let r ← signalThread main_ 30
-      stdout.putStrLn s!"sent {r}"
+      let seen ← inFlockWithin main_ 1000000
+      if seen == 1 then
+        let r ← signalThread main_ 30
+        stdout.putStrLn s!"sent {r}"
+      else
+        stdout.putStrLn s!"not seen in flock: {seen}"
       stdout.flush
     stdout.putStrLn "ready"
     stdout.flush
