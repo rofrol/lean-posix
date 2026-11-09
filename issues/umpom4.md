@@ -1,0 +1,3 @@
+lean-posix: kqWait and kqWaitFor give a record of events instead of a bit mask
+
+Split out of k3dley. Order decided with the models on 2026-11-09 after the owner approved every item (consult round 20261109-174629-3483, sol and argon; checked by the session). Signature-changing, so after every C move. Replace the mask with 0x80000000 for failure by `Except` of a record (which kinds came, the descriptors, the pids); the separate redesign sol asked for, last because every kqueue consumer loop changes. Each consumer moves its pin in its own queue; the commit message lists the changed declarations for them. Clean break, no old API kept (decided with the models: no outside users). Pure decoder theorems are optional: they prove Lean properties, not the C. Check: `lake test`.
