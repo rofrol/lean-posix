@@ -1,4 +1,4 @@
-<!-- AGENTS.md version: 1.23.0 -->
+<!-- AGENTS.md version: 1.24.0 -->
 
 # Architecture and Maintenance Policy
 
@@ -101,7 +101,9 @@ block unrelated local work.
   the same or adjacent problem and reuse proven interaction patterns where
   appropriate.
 - Keep project documentation, identifiers, code comments, architecture records,
-  and agent plans in English.
+  `DECISIONS.md`, `TODO.md`, agent plans and commit messages in English. What
+  the human said in another language is written there in English with its
+  meaning kept, never quoted in that language, not even beside a translation.
 
 ## Classifying Changes
 
@@ -294,9 +296,7 @@ Use the lightest durable location appropriate to the decision:
 The human's standing rulings, constraints and approvals that apply across
 tasks go to `DECISIONS.md` next to this file: a topical ledger, not a
 chronology, in which each entry states its date, its scope and conditions,
-and what the human said, in English with its meaning kept, never quoted
-in another language, not even beside a translation. Recording an
-approval never
+and what the human said. Recording an approval never
 broadens it; a superseded entry is replaced, naming what replaced it. Each
 decision has one home, and other places link to it.
 
@@ -326,7 +326,7 @@ outside it only for the first item of its approved work (the first item of
 reading, investigating and consulting are not such work; checks and edits
 that finish the first item belong to it. Before starting other work the
 human asks for, the agent adds it as the first item, stating the human's
-request in English (never quoted in another language), or moves it
+request, or moves it
 there when it is listed further down,
 and commits `TODO.md` by path, with the human's reason, before the work
 begins. While an item is in progress, the requested work goes right after
