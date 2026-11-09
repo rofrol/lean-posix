@@ -240,12 +240,28 @@ def kq (t : T) (dir : System.FilePath) : IO Unit := do
   stdin.flush
   t.check "nextEvent: the output is readable" ((← nextEvent k) == 0)
   t.check "drainNow takes what is there without waiting" (text (← drainNow out) == "abc")
+  -- The kernel does not order the exit and the output's end: the exit may come first.
   let evs ← eventsUntil k 1 8
   t.check "nextEvent: the output closed" (evs.getLast? == some 1) s!"{evs}"
   unwatchRead k out
-  let e ← nextEvent k
-  t.check "nextEvent: once the output is unwatched, the process exited" (e == 2) s!"{e}"
+  let after ← if evs.contains 2 then pure [] else (·::[]) <$> nextEvent k
+  t.check "nextEvent: the process exited, before or after its output closed"
+    ((evs ++ after).contains 2) s!"{evs} then {after}"
   discard child.wait
+  -- The exit first, made certain: this program holds the output's write end.
+  let (inR, inW) ← Posix.pipe
+  let (outR, outW) ← Posix.pipe
+  let pid ← spawn #["cat"] (stdin := inR) (stdout := outW)
+  close inR
+  let k3 ← watchSession pid outR 0xffffffff
+  t.check "watchSession watches a live cat" (k3 &&& 0x80000000 == 0)
+  close inW
+  t.check "nextEvent: the exit comes while the output is still open" ((← nextEvent k3) == 2)
+  close outW
+  t.check "nextEvent: then the output closes" ((← nextEvent k3) == 1)
+  discard (waitpid pid)
+  close k3
+  close outR
   let k2 ← watchSession child.pid out 0xffffffff
   t.check "watchSession of an exited process sets the high bit" (k2 &&& 0x80000000 != 0)
   close k
