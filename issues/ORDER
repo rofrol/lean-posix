@@ -1,5 +1,7 @@
 ## Next, in order
 
+o3bkwn lean-posix: agent instructions as rr2 has them: the policy AGENTS.md, an AGENTS.project.md with the architecture map, and the Lean types rules
+
 ## Proposed
 
 oukmiz termCtl's signal path allocates after raise: make the handler async-signal-safe
