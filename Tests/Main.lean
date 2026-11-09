@@ -200,6 +200,84 @@ def handed (t : T) (dir : System.FilePath) : IO Unit := do
   | .ok fd => t.check "closing the descriptor taken over lets the lock go" true; unlock fd
   | .error e => t.check "closing the descriptor taken over lets the lock go" false s!"errno {e}"
 
+/-- Takes SA_RESTART (2) off the handler `sig` has, so a blocking call the signal
+interrupts fails with EINTR: 0, or the errno. A test's own, as no binding installs
+a handler that returns without SA_RESTART. `struct sigaction` as macOS lays it out
+(handler, a 32-bit mask, flags). -/
+@[extern c inline "({ extern int sigaction(int, const void*, void*); extern int* __error(void); struct { void (*h)(int); unsigned m; int f; } a; unsigned r = 0; if (sigaction((int)#1, 0, &a) != 0) r = (unsigned)*__error(); else { a.f &= ~2; if (sigaction((int)#1, &a, 0) != 0) r = (unsigned)*__error(); } lean_io_result_mk_ok(lean_box_uint32(r)); })"]
+opaque noRestart (sig : UInt32) : IO UInt32
+
+/-- The calling thread's `pthread_t`, for `signalThread`. -/
+@[extern c inline "({ extern void* pthread_self(void); lean_io_result_mk_ok(lean_box_uint64((uint64_t)pthread_self())); })"]
+opaque thisThread : IO UInt64
+
+/-- `pthread_kill`: the signal `sig` to the thread `thread` of this process, which
+a signal sent to the process need not reach (any thread that does not block it
+may take it; Lean runs `main` on a thread of its own): 0, or the errno. A kqueue's
+EVFILT_SIGNAL does not see it. -/
+@[extern c inline "({ extern int pthread_kill(void*, int); lean_io_result_mk_ok(lean_box_uint32((unsigned)pthread_kill((void*)#1, (int)#2))); })"]
+opaque signalThread (thread : UInt64) (sig : UInt32) : IO UInt32
+
+/-- Whether every thread of `pid` sleeps, as `ps -M` reads the kernel's process
+table, read up to `n` times until it does (interval: none; each read is the next
+`ps` run, the kernel's thread states being the producer); false at once when `ps`
+fails or its header has no STAT column. The STAT column starts where its header
+does: `ps` sizes the columns over all rows, and a thread's row leaves USER and TT
+blank. -/
+def sleepsWithin (pid : UInt32) : Nat → IO Bool
+  | 0 => return false
+  | n + 1 => do
+    let out ← IO.Process.output { cmd := "/bin/ps", args := #["-M", "-p", toString pid] }
+    match (out.stdout.splitOn "\n").filter (!·.isEmpty) with
+    | header :: threads =>
+      match header.splitOn "STAT" with
+      | before :: _ :: _ =>
+        if out.exitCode != 0 then return false
+        let states := threads.map fun l => (l.drop before.length).take 1 |>.toString
+        if !states.isEmpty && states.all (· == "S") then return true
+        sleepsWithin pid n
+      | _ => return false
+    | [] => return false
+
+/-- `lockDir` waits past a signal whose handler lacks SA_RESTART. A holder (`tests
+lock-dir-hold`) takes the directory's lock; a waiter (`tests lock-dir-signal`)
+catches SIGUSR1 (30) without SA_RESTART, says "ready" and blocks in `lockDir`.
+
+Its entry into the blocking `flock` cannot be observed: macOS's `ps` shows no wait
+channel. It is inferred from every thread of the waiter sleeping in the kernel's
+process table, as after "ready" its main thread makes no blocking call but
+`lockDir`'s `open` (of a directory) and `flock`; a sleep elsewhere before `flock`
+would let the signal come before `flock`, and the unfixed `lockDir` would then pass.
+
+On "go" the waiter's helper thread sends the signal to its main thread and says
+"sent"; the holder ends only then. XNU marks an interruptible wait interrupted
+before `kill` returns (seen with a single-threaded `flock` waiter: the holder's end
+right after `kill` still gave EINTR); `pthread_kill` is taken to do the same, which
+XNU's source was not read to confirm. Were it not so, the unfixed `lockDir` could
+take the lock and pass; it failed this test with "gave up" in 5 runs of 5. -/
+def lockDirSignal (t : T) (dir : System.FilePath) : IO Unit := do
+  let d := dir / "dirlock"
+  IO.FS.createDir d
+  let self := (← IO.appPath).toString
+  let holder ← IO.Process.spawn { cmd := self, args := #["lock-dir-hold", d.toString], stdin := .piped, stdout := .piped }
+  let held ← holder.stdout.getLine
+  t.check "a holder takes the directory's lock" (held == "held\n") held.quote
+  let waiter ← IO.Process.spawn { cmd := self, args := #["lock-dir-signal", d.toString], stdin := .piped, stdout := .piped }
+  let ready ← waiter.stdout.getLine
+  t.check "the waiter catches SIGUSR1 without SA_RESTART" (ready == "ready\n") ready.quote
+  t.check "the waiter blocks in lockDir" (← sleepsWithin waiter.pid 1000)
+  waiter.stdin.putStrLn "go"
+  waiter.stdin.flush
+  let sent ← waiter.stdout.getLine
+  t.check "SIGUSR1 reaches the waiter's main thread" (sent == "sent 0\n") sent.quote
+  holder.stdin.putStrLn "go"
+  holder.stdin.flush
+  t.check "the holder ends" ((← holder.wait) == 0)
+  let got ← waiter.stdout.getLine
+  t.check "lockDir waits past EINTR and takes the lock once the holder ends"
+    (got == "locked\n") got.quote
+  t.check "the waiter ends" ((← waiter.wait) == 0)
+
 def locks (t : T) (dir : System.FilePath) : IO Unit := do
   let path := dir / "lock"
   match ← lockFile path false with
@@ -219,6 +297,7 @@ def locks (t : T) (dir : System.FilePath) : IO Unit := do
   handed t dir
   t.check "lockDir locks a directory" ((← lockDir dir.toString) != 0xffffffff)
   t.check "lockDir of no directory fails" ((← lockDir (dir / "none").toString) == 0xffffffff)
+  lockDirSignal t dir
   IO.FS.writeFile (dir / "a") "a"
   t.check "link links a free name" ((← link (dir / "a").toString (dir / "b").toString) == 0)
   t.check "link refuses a taken name with EEXIST" ((← link (dir / "a").toString (dir / "b").toString) == 17)
@@ -598,6 +677,30 @@ def main (args : List String) : IO UInt32 := do
     match ← lockHanded path (fd.toNat?.getD 0).toUInt32 with
     | .ok _ => return 0
     | .error e => return if e < 255 then e else 255
+  | ["lock-dir-hold", path] =>
+    if (← lockDir path) == 0xffffffff then return 1
+    IO.println "held"
+    (← IO.getStdout).flush
+    discard <| (← IO.getStdin).getLine
+    return 0
+  | ["lock-dir-signal", path] =>
+    let kq ← kqOpen
+    if (← catchSignals kq #[30]) != 0 then return 2
+    if (← noRestart 30) != 0 then return 3
+    let main_ ← thisThread
+    let stdin ← IO.getStdin
+    let stdout ← IO.getStdout
+    let _ ← IO.asTask (prio := .dedicated) do
+      discard <| stdin.getLine
+      let r ← signalThread main_ 30
+      stdout.putStrLn s!"sent {r}"
+      stdout.flush
+    stdout.putStrLn "ready"
+    stdout.flush
+    let fd ← lockDir path
+    stdout.putStrLn (if fd == 0xffffffff then "gave up" else "locked")
+    stdout.flush
+    return 0
   | ["path-eacces"] =>
     match ← trySpawn #["lean-posix-echo"] with
     | .ok pid => return (← waitpid pid)

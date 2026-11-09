@@ -54,9 +54,11 @@ def lockHanded (path : System.FilePath) (fd : UInt32) : IO (Except UInt32 UInt32
 @[extern c inline "({ extern int close(int); close((int)#1); lean_io_result_mk_ok(lean_box(0)); })"]
 opaque unlock (fd : UInt32) : IO Unit
 
-/-- An exclusive `flock` on the directory `path`, waited for and held until the
-process ends; no child inherits it. -1 (as a `UInt32`) when it cannot be had. -/
-@[extern c inline "({ extern int open(const char*, int, ...); extern int flock(int, int); extern int close(int); int fd = open(lean_string_cstr(#1), 0x100000 | 0x1000000); if (fd >= 0 && flock(fd, 2) != 0) { close(fd); fd = -1; } lean_io_result_mk_ok(lean_box_uint32((unsigned)fd)); })"]
+/-- An exclusive `flock` on the directory `path`, waited for past EINTR (a caught
+signal whose handler lacks SA_RESTART) until no other holder is left, and held
+until the process ends; no child inherits it. -1 (as a `UInt32`) when it cannot be
+had. -/
+@[extern c inline "({ extern int open(const char*, int, ...); extern int flock(int, int); extern int close(int); extern int* __error(void); int fd = open(lean_string_cstr(#1), 0x100000 | 0x1000000); if (fd >= 0) { int k; do k = flock(fd, 2); while (k != 0 && *__error() == 4); if (k != 0) { close(fd); fd = -1; } } lean_io_result_mk_ok(lean_box_uint32((unsigned)fd)); })"]
 opaque lockDir (path : @& String) : IO UInt32
 
 /-- A hard link `to` of `from`: 0, or the errno, EEXIST (17) when `to` is taken. -/
