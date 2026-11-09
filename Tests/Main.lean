@@ -157,6 +157,42 @@ def pty (t : T) : IO Unit := do
   close s
   close m
 
+/-- The descriptors below `limit` open in a child, `tests open-fds LIMIT` with a
+pipe as its stdout, which it reports as 1. -/
+def childFds (limit : Nat) : IO (List Nat) := do
+  let (r, w) ← Posix.pipe
+  let pid ← spawn #[(← IO.appPath).toString, "open-fds", toString limit] #[] inherit w inherit
+  close w
+  let out ← linesOf r 1
+  close r
+  discard <| waitpid pid
+  return (out.trimAscii.toString.splitOn " ").filterMap String.toNat?
+
+/-- What a child inherits of the descriptors made here: only `openPty`'s slave,
+which is not close-on-exec; not the master, a kqueue, a lock's descriptor or a
+pipe. Descriptors this process got from whoever started it do not count. -/
+def inherited (t : T) (dir : System.FilePath) : IO Unit := do
+  let (m, s) ← openPty
+  let k ← kqOpen
+  let (pr, pw) ← Posix.pipe
+  match ← lockFile (dir / "inherited") false with
+  | .error e => t.check "lockFile takes a lock" false s!"{e}"
+  | .ok lk =>
+    let ours := [m, s, k, lk, pr, pw].map (·.toNat)
+    let limit := ours.foldl max 0 + 1
+    let after ← childFds limit
+    -- The baseline: a child started once the slave is closed, which has what this
+    -- process got from whoever started it, and any of ours that leaked.
+    let closedHere := ours.filter (· != s.toNat)
+    close s
+    let without ← childFds limit
+    t.check "a child inherits the slave of openPty and none of the master, a kqueue, a lock or a pipe"
+      (after.contains s.toNat && !without.contains s.toNat
+        && closedHere.all (!after.contains ·) && after.filter (· != s.toNat) == without)
+      s!"with the slave {after}, without {without}; master {m} slave {s} kqueue {k} lock {lk} pipe {pr} {pw}"
+    unlock lk
+  close pr; close pw; close k; close m
+
 /-- The exit status of `tests lock-handed PATH FD` with `fd`, and `open` (a shell
 redirection) before it: 0 once it took over the lock, else the errno or 255. -/
 def handedIn (path : System.FilePath) (fd : UInt32) (open_ : String := "") : IO UInt32 := do
@@ -732,6 +768,12 @@ def main (args : List String) : IO UInt32 := do
       let (m, _) ← kqWait kq false
       if m &&& 2 != 0 then say; return 0
     return 4
+  | ["open-fds", limit] =>
+    -- An ioctl on each number, which opens nothing: EBADF (9) when it is closed.
+    let open_ ← (List.range (limit.toNat?.getD 0)).filterM fun fd => do
+      return match ← winSizeOf fd.toUInt32 with | .error 9 => false | _ => true
+    IO.print s!"{" ".intercalate (open_.map toString)}\n"
+    return 0
   | ["term"] =>
     if (← termCtl 0) != 0 then return 3
     IO.print "inside"
@@ -773,6 +815,7 @@ def main (args : List String) : IO UInt32 := do
     fds t dir
     fileAt t dir
     pty t
+    inherited t dir
     locks t dir
     kq t dir
     exits t
