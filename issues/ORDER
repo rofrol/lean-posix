@@ -12,6 +12,7 @@ mtobhv lean-posix: move Spawn's pipe, waitpid, waitStatus and writeAll into the 
 mnksgg lean-posix: the lockDir EINTR test cannot tell lf_setlock's abort-safe sleep from another interruptible wait inside flock
 tuvst2 lean-posix: diagnostic, does trySpawn's fork fail in a multithreaded Lean process while other threads are inside libSystem
 quboep lean-posix: design how 53zc6j's ctty helper executable is built, shipped and found by consumers
+x3fn73 lean-posix: typed results for watch, openEvents and watchSession
 
 ## Needs a decision
 
