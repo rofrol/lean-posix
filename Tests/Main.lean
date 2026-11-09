@@ -732,6 +732,13 @@ def term (t : T) : IO Unit := do
   let leaveAll := s!"\x1b[?1006l{motionOff}\x1b[?1000l{pointerReset}\x1b[0m\x1b[?7h\x1b[?25h{leave}"
   t.check "termCtl 0 does not turn any-motion reports on, and leaving resets them and the pointer"
     (!contains out motionOn && contains out leaveAll) out.quote
+  -- 256 hex digits, 128 bytes, as every build before `c/term.c` wrote and read
+  -- them: a build hands the terminal to the next one across exec, which may be
+  -- built from another version of this library.
+  let (out, code) ← onPty "term-hand-over"
+  t.check "termCtl 1003 hands the terminal over as 256 hex digits, 1004 takes it back, 1002 takes it"
+    (code == .exited 0 && contains out "handed 0 256 true true took 0 true." && contains out leaveAll)
+    s!"{repr code} {out.quote}"
   let (out, code) ← onPty "term-motion"
   t.check "termEnter (motion := true) turns SGR any-motion reports on"
     (code == .exited 0 && contains out enter && contains out motionOn && contains out sgrOn && !contains out mouseOn
@@ -845,6 +852,20 @@ def main (args : List String) : IO UInt32 := do
   | ["term"] =>
     if (← termCtl 0) != 0 then return 3
     IO.print "inside"
+    (← IO.getStdout).flush
+    discard <| termCtl 1000
+    return 0
+  | ["term-hand-over"] =>
+    if (← termCtl 0) != 0 then return 3
+    let put ← termCtl 1003
+    let h := (← IO.getEnv "LEAN_POSIX_TERMIOS").getD ""
+    let hex := h.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f')
+    discard <| termCtl 1004
+    let cancelled := (← IO.getEnv "LEAN_POSIX_TERMIOS").isNone
+    discard <| termCtl 1003
+    let took ← termCtl 1002
+    let removed := (← IO.getEnv "LEAN_POSIX_TERMIOS").isNone
+    IO.print s!"handed {put} {h.length} {hex} {cancelled} took {took} {removed}."
     (← IO.getStdout).flush
     discard <| termCtl 1000
     return 0

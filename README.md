@@ -1,8 +1,10 @@
 # lean-posix
 
-POSIX calls Lean 4's library lacks, as Lean bindings, for macOS. Each binding is
-one `@[extern c inline "..."]` expression that declares the C functions it calls,
-so there is no C file, no header and no build step beyond Lake's. Every binding's
+POSIX calls Lean 4's library lacks, as Lean bindings, for macOS. Most bindings
+are one `@[extern c inline "..."]` expression that declares the C functions it
+calls; the terminal's (`Posix.termCtl`) is C in `c/term.c`, which Lake compiles
+against the macOS SDK's headers, and `c/abi.c` checks the numbers and struct
+layouts the expressions write by hand against those headers. Every binding's
 contract is in its doc comment.
 
 Written for rr's watcher, supervisor and terminal UI, and kept apart so that
@@ -34,8 +36,13 @@ nor tell a program whose exec failed from one that ran and died.
 ## Platform
 
 macOS only: the constants (flags, errnos, ioctl numbers, `struct kevent`'s
-layout, `__error()` for errno) are macOS's, written as numbers in each expression
-and listed in each module's header.
+layout, `__error()` for errno) are macOS's, written as numbers in each expression,
+listed in each module's header and checked against the SDK by `c/abi.c`.
+
+Building needs the macOS SDK, from Xcode or the Command Line Tools
+(`xcode-select --install`): Lake finds it with `xcrun --show-sdk-path` and
+compiles `c/*.c` with the Lean toolchain's clang. This holds for every package
+that requires lean-posix, as its executables link that C.
 
 ## Use
 

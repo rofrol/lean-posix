@@ -1,10 +1,14 @@
 # lean-posix's own rules for agents
 
-- Everything is Lean: the bindings, their tests, the checks (`lake build`,
-  `lake test`) and any helper or stand-in a test needs. No shell, bash, perl,
-  Python or C files in this repository; C lives only inside each binding's
+- Everything is Lean or C: the bindings, their tests, the checks (`lake build`,
+  `lake test`) and any helper or stand-in a test needs. No shell, bash, perl or
+  Python files in this repository. A binding's C is either its own
   `@[extern c inline "..."]` expression, which declares every function it calls,
-  so there is no header and no build step beyond Lake's.
+  or a function in `c/*.c` bound with `@[extern "lean_posix_..."]`, which
+  includes the SDK's headers (`DECISIONS.md`, "C files"). In `c/`, exported
+  symbols are `lean_posix_*` and everything else is `static`. Lake compiles
+  `c/*.c` (the `leanposixc` extern_lib in `lakefile.lean`) with the toolchain's
+  clang against the macOS SDK, every warning an error.
 - The queue is `issues/ORDER` with one `issues/ID.md` per item, in rr's format:
   sections `## Next, in order`, `## Proposed`, `## Needs a decision`; one
   `ID TITLE` line per item, ID six characters of a-z and 2-7; the item's file
@@ -15,8 +19,11 @@
   without the lock. An agent rr2 runs on an item changes no file under
   `issues/`: rr2 finishes the item and adds its proposals.
 - macOS only: every constant (flags, errnos, ioctl numbers, struct layouts,
-  `__error()` for errno) is macOS's, written as a number in the expression and
-  listed in its module's header. A Linux port would be new work (inotify and
+  `__error()` for errno) is macOS's. In an inline expression it is written as a
+  number, listed in its module's header and, when it has a header name,
+  asserted against the SDK in `c/abi.c` (`_Static_assert`), so a wrong one fails
+  the build; a number an expression starts using gets its assertion there in
+  the same change. `c/*.c` use the headers' names instead. A Linux port would be new work (inotify and
   poll, Linux termios), not a change to a binding.
 - Toolchain: `lean-toolchain` (a Lean nightly); no Lake dependencies.
 - Each binding's contract is its doc comment, and consumers rely on it: a
@@ -69,9 +76,11 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   that exec resets (`catchSignals`, `nextSignal`).
 - `Term.lean`: `termCtl` (one entry point by numeric `op`: enter, leave,
   install signal handlers, hand the terminal across exec through
-  `LEAN_POSIX_TERMIOS`, or a signal number arriving) and `termEnter`. Its C
-  keeps the saved terminal and an "entered" flag in two statics, so the
-  terminal state is process-global.
+  `LEAN_POSIX_TERMIOS`, or a signal number arriving) and `termEnter`. Its C is
+  `c/term.c`, which keeps the saved terminal and an "entered" flag in two
+  statics, so the terminal state is process-global.
+- `c/abi.c`: no code, only `_Static_assert`s of the inline expressions'
+  numbers and struct layouts against the SDK's.
 
 Allowed dependency directions: `Spawn` and `Kqueue` may import `Fd`
 (`Spawn` also imports `Std.Sync.Mutex` and `Std.Tactic.BVDecide`); no other
@@ -82,7 +91,9 @@ module imports another; nothing here imports a consumer. The tests import
 
 - Every binding is FFI into libc on macOS, unchecked by Lean: an expression's
   struct layout or constant that is wrong for the running OS is undefined
-  behavior, caught only by `lake test` on that OS.
+  behavior. `c/abi.c` checks those with a header name against the SDK the
+  build uses; a hand-written function declaration in an expression is not
+  checked, and the rest is caught only by `lake test` on that OS.
 - Privileged or process-wide effects: `exec`/`execResume` replace the
   process; `killNow` and `kill` signal any pid or group the caller names;
   `catchSignals` catches the signals it is given process-wide with a no-op handler; `termCtl`
@@ -108,7 +119,9 @@ Other users, if any, are not known here.
 
 ## Verification
 
-- `lake build`: the library.
+- `lake build`: the library and `leanposixc`, the C of `c/` (which fails on a
+  wrong number in `c/abi.c`); the macOS SDK (Xcode or the Command Line Tools,
+  `xcrun --show-sdk-path`) is a build requirement, of every consumer too.
 - `lake test`: the `tests` executable (`Tests/Main.lean`), each binding
   against the real system in a temporary directory, the terminal tests in
   children it starts on a pty (`tests term`, `tests term-signal`); the exit
