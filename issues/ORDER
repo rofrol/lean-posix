@@ -12,10 +12,10 @@ gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the 
 x3fn73 lean-posix: typed results for watch, openEvents and watchSession
 7gq47o lean-posix: typed results for openPty, loginTty, lockDir and the Lock raw declarations
 6wcjcq lean-posix: spawnRaw and processStartRaw private
+umpom4 lean-posix: kqWait and kqWaitFor give a record of events instead of a bit mask
 
 ## Proposed
 
 mnksgg lean-posix: the lockDir EINTR test cannot tell lf_setlock's abort-safe sleep from another interruptible wait inside flock
-umpom4 lean-posix: kqWait and kqWaitFor give a record of events instead of a bit mask
 
 ## Needs a decision
