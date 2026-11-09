@@ -4,12 +4,12 @@ tuvst2 lean-posix: diagnostic, does trySpawn's fork fail in a multithreaded Lean
 zcyzdk lean-posix: move the termCtl handler and terminal state into a C file built by Lake, with system headers and _Static_assert checks
 atn2r3 lean-posix: move the Kqueue bindings into the C file, with <sys/event.h> instead of hand-declared struct kevent
 ot2tus lean-posix: move the Pty, Fd and Lock bindings into the C file, with real termios, winsize, stat and fcntl declarations
+vq7btc lean-posix: move the Process bindings into the C file, with <libproc.h> and <signal.h>
 
 ## Proposed
 
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
-vq7btc lean-posix: move the Process bindings into the C file, with <libproc.h> and <signal.h>
 mtobhv lean-posix: move Spawn's pipe, waitpid, waitStatus and writeAll into the C file; spawnRaw waits for 53zc6j
 mnksgg lean-posix: the lockDir EINTR test cannot tell lf_setlock's abort-safe sleep from another interruptible wait inside flock
 quboep lean-posix: design how 53zc6j's ctty helper executable is built, shipped and found by consumers
