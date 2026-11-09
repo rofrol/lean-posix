@@ -1,4 +1,4 @@
-<!-- AGENTS.md version: 1.22.0 -->
+<!-- AGENTS.md version: 1.23.0 -->
 
 # Architecture and Maintenance Policy
 
@@ -248,7 +248,9 @@ Agent tool use follows the same boundaries:
 - When a lifecycle is held in flags or pending operations that change
   together and permit illegal combinations, give it one explicit state type
   with named transitions, keep the durable record as its source of truth
-  (Rule 10), and test that illegal transitions are rejected. Do not add
+  (Rule 10), and test that illegal transitions are rejected, or rule them
+  out in the type itself, where no illegal transition can be written and
+  none needs a rejection test. Do not add
   reducers, transition tables or frameworks to linear, single-owner or
   ephemeral code; a plain enum often suffices.
 - Never make a check pass by weakening it: no deleting, loosening or
@@ -352,7 +354,11 @@ When an agent finds that it broke a rule, it puts the prevention where the
 rule lives (this policy, the global agent rules, a shared hook), for every
 repository the rule covers, or, where that place's approval rules require
 it, records the prevention there as open work, before or with the local
-cleanup; an apology or a local patch never stands in for it.
+cleanup; an apology or a local patch never stands in for it. A headless
+run, or one limited to a single item, never edits that place itself: it
+records the prevention as open work in that place's queue when it may
+write to it, or else names it in its report for the session that changes
+that place, and that session does it.
 
 ### 6. Minimize the Number of Concepts
 
@@ -404,7 +410,12 @@ fewest lines. Read and trace the affected code before selecting a step.
   stays unresolved until a quoted upstream passage or a maintainer's
   statement settles it (current behavior alone never does). Meanwhile the
   item is blocked and no local workaround is added; asking upstream is an
-  outward action gated like the PR below.
+  outward action gated like the PR below. The user may instead approve a
+  supported-subset contract grounded in the pinned version's implementation
+  and tests: written next to our code with those references, marked as not
+  an upstream guarantee and rechecked at each update of the dependency; our
+  code then uses only that subset, in plain form, without working around
+  the excluded parts.
 - For a bug, never add a local workaround in our tree (adapter, wrapper,
   special case, retry, source contortion or build-time patch): fix it in a
   fork under the user's account, on a branch from the pinned upstream
@@ -520,7 +531,11 @@ Measure progress by reduced complexity and delivered behavior, not lines added.
   unrelated parts of the system.
 - Divide larger work along behavior or module boundaries, not arbitrary line or
   file limits.
-- Keep the system working and independently verifiable after each step.
+- Keep the system working and independently verifiable after each committed
+  step. While editing toward one, run the narrowest fast check that covers
+  the edit (compile the touched module or target, run its focused tests);
+  run the full checks once before the commit, and all of them again at
+  integration.
 - Do not create a temporary architecture that is harder to understand than the
   final design merely to split the work.
 - Keep commits coherent and arrange them so they tell the reasoning of the
@@ -558,8 +573,12 @@ Measure progress by reduced complexity and delivered behavior, not lines added.
 - Periodic catch-up of one's own events is a violation, whatever it is called
   (sweep, safety net, watchdog, catch-up, reconcile loop). A timer-driven
   rescan, resend, or repair of internally produced or lost events is not a fix.
-  Instead keep durable state as the source of truth, persist the cursor or
-  progress before acknowledging, reconcile when producing events, at startup,
+  Instead keep durable state as the source of truth, make progress
+  crash-safe before acknowledging (commit each effect and the cursor that
+  records it together, or persist a replayable intent before the effect,
+  make the effect idempotent and advance the cursor only once the effect is
+  confirmed, so that a crash neither skips nor doubles an effect),
+  reconcile when producing events, at startup,
   and at handoff, and treat notifications only as wake-ups for consumers.
   Correct the missing producer, consumer, or acknowledgement path. Polling or
   reconciliation of an external system must name that external producer and
@@ -670,6 +689,12 @@ work with `git stash` or `git rebase --autostash`: intent-to-add entries
 make the stash fail, and a conflicting `stash pop` leaves a half-applied
 tree with the work kept only in a stash entry, outside the branch.
 
+A commit on the work's own branch, a provisional one like this included,
+is not integration: a review required before a change is committed
+applies before the change is integrated (merged, fast-forwarded or pushed
+to a shared branch), names the revision it reviewed, and that exact
+revision is what gets integrated.
+
 ## Stop and Ask
 
 Stop the affected implementation and ask for human direction when an unresolved
@@ -720,7 +745,22 @@ question in `TODO.md`'s "Needs a decision" where the repository keeps one,
 or ask the user, and report the work as incomplete until it is answered.
 Never leave it as an "open observation" or "cause unknown" in a reply or a
 commit message, never invent a cause to close it, and never report
-verification it affected as passing.
+verification it affected as passing. An anomaly needs no causal trace only
+when evidence establishes that it bears neither on the work's correctness
+nor on the validity of its verification (for example, it lies in a part
+the work neither touches nor relies on); that it also occurs on the
+unchanged base does not establish this alone. Report the evidence for
+such an exclusion, without claiming a cause, and record the anomaly as a
+gap (Rule 5) where it may matter elsewhere.
+
+A claim that something is missing, not installed or broken states what was
+checked, and is filed as a defect, or offered as the premise of a fix, only
+once evidence from the code that installs or configures that thing, the
+tool's own query of its effective state, or a safe reproduction of the
+failure establishes that specific claim in the affected environment; an
+expected path or configuration entry alone confirms nothing. Until then it is reported as "not found in" the places checked;
+absence from one expected location proves nothing when the thing can be
+set up another way.
 
 For a non-trivial change, include this summary in the final response or
 pull-request description, omitting fields that do not apply:
