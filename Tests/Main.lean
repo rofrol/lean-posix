@@ -534,13 +534,12 @@ def signals (t : T) : IO Unit := do
   t.check "catchSignals reports SIGTERM then SIGHUP sent to the process, which lives on; a child spawned after it dies of SIGINT"
     (out.exitCode == 0 && out.stdout == "15 1 2\n") s!"{out.exitCode} {out.stdout.quote} {out.stderr.quote}"
 
-/-- The output on the pty's master of `tests ARG` run with the slave as its stdio. -/
-def onPty (arg : String) : IO (String × UInt32) := do
+/-- The output on the pty's master of `tests ARG` run with the slave as its stdio,
+and how that process ended. -/
+def onPty (arg : String) : IO (String × ExitOutcome) := do
   let (m, s) ← openPty
   let self := (← IO.appPath).toString
-  -- The slave is inherited, as only the master is kept from children.
-  let child ← IO.Process.spawn { cmd := "/bin/sh", args := #["-c", s!"exec \"$0\" {arg} <&{s} >&{s}", self] }
-  let code ← child.wait
+  let code ← waitOutcome (← spawn #[self, arg] (stdin := s) (stdout := s))
   -- Read while the slave is open: its last close drops what the master holds. Not
   -- `drainNow`: FIONREAD on a pty's master says 0 on macOS.
   let out ← read m 4096
@@ -556,7 +555,7 @@ def term (t : T) : IO Unit := do
   let leave := "\x1b[?1049l"
   let (out, code) ← onPty "term"
   t.check "termCtl 0 enters the full screen and 1000 leaves it"
-    (code == 0 && contains out s!"{enter}" && contains out "inside" && contains out leave) s!"{code} {out.quote}"
+    (code == .exited 0 && contains out s!"{enter}" && contains out "inside" && contains out leave) s!"{repr code} {out.quote}"
   let mouseOn := "\x1b[?1000h"
   let sgrOn := "\x1b[?1006h"
   t.check "termCtl 0 turns SGR mouse reports on" (contains out mouseOn && contains out sgrOn) out.quote
@@ -570,23 +569,23 @@ def term (t : T) : IO Unit := do
     (!contains out motionOn && contains out leaveAll) out.quote
   let (out, code) ← onPty "term-motion"
   t.check "termEnter (motion := true) turns SGR any-motion reports on"
-    (code == 0 && contains out enter && contains out motionOn && contains out sgrOn && !contains out mouseOn
-      && contains out "inside") s!"{code} {out.quote}"
+    (code == .exited 0 && contains out enter && contains out motionOn && contains out sgrOn && !contains out mouseOn
+      && contains out "inside") s!"{repr code} {out.quote}"
   t.check "and leaving turns them off and resets the pointer shape before leaving the alternate screen"
-    (contains out leaveAll) s!"{code} {out.quote}"
+    (contains out leaveAll) s!"{repr code} {out.quote}"
   let (out, code) ← onPty "term-motion-no-mouse"
   t.check "termEnter (mouse := false) (motion := true) still turns any-motion reports on"
-    (code == 0 && contains out motionOn && contains out sgrOn && contains out leaveAll) s!"{code} {out.quote}"
+    (code == .exited 0 && contains out motionOn && contains out sgrOn && contains out leaveAll) s!"{repr code} {out.quote}"
   let (out, code) ← onPty "term-no-mouse"
   t.check "termEnter (mouse := false) enters the full screen without mouse reports"
-    (code == 0 && contains out enter && contains out "inside" && contains out leave
-      && !contains out mouseOn && !contains out sgrOn) s!"{code} {out.quote}"
+    (code == .exited 0 && contains out enter && contains out "inside" && contains out leave
+      && !contains out mouseOn && !contains out sgrOn) s!"{repr code} {out.quote}"
   let (out, code) ← onPty "term-signal"
-  t.check "a signal leaves the full screen and ends the process"
-    (code != 0 && contains out enter && contains out leave && !contains out "survived") s!"{code} {out.quote}"
+  t.check "a signal leaves the full screen and ends the process by that signal"
+    (code == .signaled 15 && contains out enter && contains out leave && !contains out "survived") s!"{repr code} {out.quote}"
   let (out, code) ← onPty "term-motion-signal"
   t.check "a signal leaves any-motion reports off and the pointer shape reset"
-    (code != 0 && contains out motionOn && contains out leaveAll && !contains out "survived") s!"{code} {out.quote}"
+    (code == .signaled 15 && contains out motionOn && contains out leaveAll && !contains out "survived") s!"{repr code} {out.quote}"
 
 def main (args : List String) : IO UInt32 := do
   match args with
