@@ -9,7 +9,6 @@ k3dley lean-posix: results encoded as high bits or "large numbers" as Except val
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
 iafpuo lean-posix: decide whether waitOutcome should report a traced child's stop instead of passing it by
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
-ldvclw lean-posix: Term.lean names its sigaction flags 0x14 SA_RESTART | SA_RESETHAND, which on macOS is SA_NODEFER | SA_RESETHAND
 jd6rjr lean-posix: openPty's master is made close-on-exec only after openpty returns, so a fork in another thread can inherit it
 nhg7tl lean-posix: lockDir gives up when a signal interrupts its blocking flock
 
