@@ -3,6 +3,7 @@
 vmzqho lean-posix: the kq test hangs when the process's exit comes before its output's end
 oukmiz termCtl's signal path allocates after raise: make the handler async-signal-safe
 nhg7tl lean-posix: lockDir gives up when a signal interrupts its blocking flock
+jd6rjr lean-posix: openPty's master is made close-on-exec only after openpty returns, so a fork in another thread can inherit it
 
 ## Proposed
 
@@ -10,6 +11,5 @@ nhg7tl lean-posix: lockDir gives up when a signal interrupts its blocking flock
 k3dley lean-posix: results encoded as high bits or "large numbers" as Except values
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
-jd6rjr lean-posix: openPty's master is made close-on-exec only after openpty returns, so a fork in another thread can inherit it
 
 ## Needs a decision
