@@ -1,6 +1,5 @@
 ## Next, in order
 
-smisrg lean-posix: openPty's slave is inherited by every child, so a spawn in another thread before the caller closes it keeps the pty open
 abcwsi lean-posix: confirm the two assumptions behind the lockDir EINTR test
 
 ## Proposed
