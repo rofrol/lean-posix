@@ -1,6 +1,5 @@
 ## Next, in order
 
-csgol3 Term: enter the full screen without mouse reports, as op 1005 of termCtl and `termEnter (mouse := true)`
 p7gfgy Fd: read a file's device, inode, size and bytes from an offset, on one descriptor
 
 ## Proposed

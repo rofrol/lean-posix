@@ -451,6 +451,13 @@ def term (t : T) : IO Unit := do
   let (out, code) ← onPty "term"
   t.check "termCtl 0 enters the full screen and 1000 leaves it"
     (code == 0 && contains out s!"{enter}" && contains out "inside" && contains out leave) s!"{code} {out.quote}"
+  let mouseOn := "\x1b[?1000h"
+  let sgrOn := "\x1b[?1006h"
+  t.check "termCtl 0 turns SGR mouse reports on" (contains out mouseOn && contains out sgrOn) out.quote
+  let (out, code) ← onPty "term-no-mouse"
+  t.check "termEnter (mouse := false) enters the full screen without mouse reports"
+    (code == 0 && contains out enter && contains out "inside" && contains out leave
+      && !contains out mouseOn && !contains out sgrOn) s!"{code} {out.quote}"
   let (out, code) ← onPty "term-signal"
   t.check "a signal leaves the full screen and ends the process"
     (code != 0 && contains out enter && contains out leave && !contains out "survived") s!"{code} {out.quote}"
@@ -484,6 +491,12 @@ def main (args : List String) : IO UInt32 := do
     return 4
   | ["term"] =>
     if (← termCtl 0) != 0 then return 3
+    IO.print "inside"
+    (← IO.getStdout).flush
+    discard <| termCtl 1000
+    return 0
+  | ["term-no-mouse"] =>
+    if (← termEnter (mouse := false)) != 0 then return 3
     IO.print "inside"
     (← IO.getStdout).flush
     discard <| termCtl 1000

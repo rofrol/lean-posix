@@ -1,5 +1,0 @@
-Term: enter the full screen without mouse reports, as op 1005 of termCtl and `termEnter (mouse := true)`
-
-Asked by rr2 (its issue lt2x2v; the owner decided 2026-11-09 to turn the mouse off in lean-posix and, the same day, to keep lean-posix's work in this queue). `Posix.termCtl 0` enters the full screen with SGR mouse reports on (`\x1b[?1000h\x1b[?1006h`); rr2-view uses no mouse, and while they are on, selecting text in the terminal needs Option or Shift. Design from rr2's consult round 20261109-005255-d8e1 (sol, argon): a new op 1005 of `termCtl`, "enter the full screen without mouse reports" (not 2, which other ops read as SIGINT), and a named Lean function such as `termEnter (mouse : Bool := true)`; op 0 stays as it is, since rr's viewer uses the wheel and clicks; leaving still turns the mouse off. With a test on a pty that the reports are not turned on.
-
-Base it on b68e7e2a3f48, the commit rr2 pins (tag `pin/b68e7e2a3f48`, branch `rr/wxo6ru`), and push a `pin/<sha12>` tag for the result so rr2 can pin it; p7gfgy may share the same commit and tag. The same request is queued in rr as 55j4oe (rr commit cfbb7dd); one of the two is dropped once this lands.
