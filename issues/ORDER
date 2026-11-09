@@ -1,7 +1,5 @@
 ## Next, in order
 
-j3aw7s lean-posix: send any signal to a process, wait for TERM/HUP/INT as kqueue events, and read the window size of any descriptor
-
 ## Proposed
 
 oukmiz termCtl's signal path allocates after raise: make the handler async-signal-safe
@@ -11,5 +9,6 @@ k3dley lean-posix: results encoded as high bits or "large numbers" as Except val
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
 iafpuo lean-posix: decide whether waitOutcome should report a traced child's stop instead of passing it by
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
+ldvclw lean-posix: Term.lean names its sigaction flags 0x14 SA_RESTART | SA_RESETHAND, which on macOS is SA_NODEFER | SA_RESETHAND
 
 ## Needs a decision
