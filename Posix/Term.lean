@@ -75,7 +75,16 @@ example "Reset the pointer to default", and says "The terminal must maintain
 separate shape stacks for the _main_ and _alternate_ screens".
 
 The handler is plain C that calls nothing of Lean's, only `write`, `tcsetattr`
-and `raise`, which are async-signal-safe. -/
+and `raise`, which are async-signal-safe.
+
+Accepted portability debt: the handler op 1001 installs has the type
+`uint32_t (*)(uint32_t)`, cast to `void (*)(int)`, since a Lean function cannot
+return `void` and this library's C lives only in inline expressions. Calling a
+function through an incompatible pointer type is undefined behavior in C
+(C11 6.3.2.3p8). It works with the macOS arm64 and x86_64 calling conventions,
+which pass the signal number and ignore the result, but would trap under
+`-fsanitize=function` or arm64e pointer authentication, neither of which the
+Lean toolchain uses here. -/
 def termCtl (op : UInt32) : IO UInt32 := termRaw op
 
 /-- Enters the full screen in raw mode, with SGR mouse reports when `mouse` (op 0
