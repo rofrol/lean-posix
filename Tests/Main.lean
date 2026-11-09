@@ -510,6 +510,23 @@ def term (t : T) : IO Unit := do
   let mouseOn := "\x1b[?1000h"
   let sgrOn := "\x1b[?1006h"
   t.check "termCtl 0 turns SGR mouse reports on" (contains out mouseOn && contains out sgrOn) out.quote
+  let motionOn := "\x1b[?1003h"
+  let motionOff := "\x1b[?1003l"
+  let pointerReset := "\x1b]22;\x1b\\"
+  -- The whole leave string, in its order: the pointer reset before the alternate
+  -- screen is left, as each screen has a shape stack of its own.
+  let leaveAll := s!"\x1b[?1006l{motionOff}\x1b[?1000l{pointerReset}\x1b[0m\x1b[?7h\x1b[?25h{leave}"
+  t.check "termCtl 0 does not turn any-motion reports on, and leaving resets them and the pointer"
+    (!contains out motionOn && contains out leaveAll) out.quote
+  let (out, code) ← onPty "term-motion"
+  t.check "termEnter (motion := true) turns SGR any-motion reports on"
+    (code == 0 && contains out enter && contains out motionOn && contains out sgrOn && !contains out mouseOn
+      && contains out "inside") s!"{code} {out.quote}"
+  t.check "and leaving turns them off and resets the pointer shape before leaving the alternate screen"
+    (contains out leaveAll) s!"{code} {out.quote}"
+  let (out, code) ← onPty "term-motion-no-mouse"
+  t.check "termEnter (mouse := false) (motion := true) still turns any-motion reports on"
+    (code == 0 && contains out motionOn && contains out sgrOn && contains out leaveAll) s!"{code} {out.quote}"
   let (out, code) ← onPty "term-no-mouse"
   t.check "termEnter (mouse := false) enters the full screen without mouse reports"
     (code == 0 && contains out enter && contains out "inside" && contains out leave
@@ -517,6 +534,9 @@ def term (t : T) : IO Unit := do
   let (out, code) ← onPty "term-signal"
   t.check "a signal leaves the full screen and ends the process"
     (code != 0 && contains out enter && contains out leave && !contains out "survived") s!"{code} {out.quote}"
+  let (out, code) ← onPty "term-motion-signal"
+  t.check "a signal leaves any-motion reports off and the pointer shape reset"
+    (code != 0 && contains out motionOn && contains out leaveAll && !contains out "survived") s!"{code} {out.quote}"
 
 def main (args : List String) : IO UInt32 := do
   match args with
@@ -556,6 +576,22 @@ def main (args : List String) : IO UInt32 := do
     IO.print "inside"
     (← IO.getStdout).flush
     discard <| termCtl 1000
+    return 0
+  | ["term-motion"] =>
+    if (← termEnter (motion := true)) != 0 then return 3
+    IO.print "inside"
+    (← IO.getStdout).flush
+    discard <| termCtl 1000
+    return 0
+  | ["term-motion-no-mouse"] =>
+    if (← termEnter (mouse := false) (motion := true)) != 0 then return 3
+    discard <| termCtl 1000
+    return 0
+  | ["term-motion-signal"] =>
+    discard <| termCtl 1001
+    if (← termEnter (motion := true)) != 0 then return 3
+    discard <| IO.Process.output { cmd := "kill", args := #["-TERM", toString (← IO.Process.getPID)] }
+    IO.print "survived"
     return 0
   | ["term-signal"] =>
     discard <| termCtl 1001

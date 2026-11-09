@@ -18,7 +18,7 @@ their shells hold no C of their own.
 | `Posix.Spawn`   | a spawn that says whether its exec failed (fork, a close-on-exec pipe for the exec's result, `execve` along PATH), in a session of its own on a controlling terminal if asked, `pipe`, `waitpid`, a write of every byte |
 | `Posix.Lock`    | exclusive `flock` on a file or a directory, such a lock handed to the next program this process executes (`fstat`, `stat`), `link` that fails on a taken name |
 | `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; the exits of processes that need not be children; stdin, SIGWINCH, files and exits of processes for a full-screen program, waited for with or without a timeout |
-| `Posix.Term`    | a full-screen terminal in raw mode, restored on every exit and signal that can be caught, and handed to a new build across `exec` |
+| `Posix.Term`    | a full-screen terminal in raw mode, with click or any-motion mouse reports or none, restored (mouse reports off, the pointer shape reset) on every exit and signal that can be caught, and handed to a new build across `exec` |
 
 ## Why not `Std.Internal.UV`
 
@@ -55,7 +55,8 @@ process, its pipe, a directory and files, the exits of processes watched
 while alive, after their exit and after their reaping, on their own kqueue and a full-screen
 program's, a full-screen program's wait that times out with nothing and one an event ends first, processes' start times, exec, kill, spawns that
 run and spawns whose exec or setup fails, each with its errno, and the terminal's full
-screen entered, left, and left on a signal, in children on a pty.
+screen entered with and without mouse reports, left, and left on a signal, with mouse reports
+turned off and the pointer shape reset, in children on a pty.
 
 ## License
 
