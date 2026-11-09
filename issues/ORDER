@@ -1,9 +1,10 @@
 ## Next, in order
 
+vmzqho lean-posix: the kq test hangs when the process's exit comes before its output's end
+
 ## Proposed
 
 oukmiz termCtl's signal path allocates after raise: make the handler async-signal-safe
-vmzqho lean-posix: the kq test hangs when the process's exit comes before its output's end
 6wkd7n lean-posix: record here the owner's ruling that its history may be rewritten and rr2's pin tags moved
 k3dley lean-posix: results encoded as high bits or "large numbers" as Except values
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
