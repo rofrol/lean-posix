@@ -1,7 +1,7 @@
 ## Next, in order
 
-gmh7qf termEnter: any-motion mouse reports, and leaving the screen resets them and the pointer shape
-
 ## Proposed
+
+oukmiz termCtl's signal path allocates after raise: make the handler async-signal-safe
 
 ## Needs a decision
