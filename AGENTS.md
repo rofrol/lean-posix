@@ -1,4 +1,4 @@
-<!-- AGENTS.md version: 1.21.0 -->
+<!-- AGENTS.md version: 1.22.0 -->
 
 # Architecture and Maintenance Policy
 
@@ -539,7 +539,8 @@ Measure progress by reduced complexity and delivered behavior, not lines added.
   retry an idempotent action until its effect is observed, publish data
   atomically, and report the awaited condition and observed state on timeout.
   Every wait names the positive event or condition it waits for and what
-  produces it, never a negative one ("idle for N", "no marker for N").
+  produces it, never a negative one ("idle for N", "no marker for N"); the
+  quiet-command wake below is an exception.
   When a wait awaits an operation's end, its condition is a completion mark
   the producer emits whatever the outcome (or the producer's exit), never the
   expected outcome; judge the outcome after the wait returns.
@@ -567,9 +568,21 @@ Measure progress by reduced complexity and delivered behavior, not lines added.
   outside its own system that sends no event (a hung OS process, free disk
   space, the wall clock), naming that producer. It never re-checks state its
   own pipeline wrote, read-only or not, and what it finds on the interval
-  wakes no agent and repairs nothing. A predicate over one's own state that
-  only the interval catches is a lost-event bug in its producer, consumer or
-  acknowledgement path.
+  wakes no agent (save the quiet-command wake below) and repairs nothing. A
+  predicate over one's own state that only the interval catches is a
+  lost-event bug in its producer, consumer or acknowledgement path.
+- A runner may wake the agent that started a command when the command has
+  gone quiet: no new output and no exit for an interval the runner declares,
+  bounded, with its value and reason stated next to the code. The command is
+  an external producer, as a person is; the wake reports the command, how
+  long it has been quiet and its last output, and the agent decides. It
+  kills, retries and repairs nothing, and it never stands in for an event the
+  runner's own system produces. It wakes once per quiet spell: only new
+  output or the command's exit ends the wait and lets another start. The
+  wake is a report, never a fix: a command that is code of one's own system
+  and hangs on its own asynchronous wait remains a bug signal under this
+  rule. Ending a hung command is a separate, declared deadline, not this
+  wake.
 - This rule is about workarounds in code and tooling for one's own
   asynchronous events. Waiting on a person is waiting on an external
   producer: an interval since a question was asked (for example, starting
