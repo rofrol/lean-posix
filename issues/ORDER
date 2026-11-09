@@ -1,7 +1,5 @@
 ## Next, in order
 
-qh4sig Signals as kqueue events, a kill of any signal, and a spawn that gives the child the default signals
-
 
 ## Proposed
 
