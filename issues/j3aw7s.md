@@ -1,0 +1,10 @@
+lean-posix: send any signal to a process, wait for TERM/HUP/INT as kqueue events, and read the window size of any descriptor
+
+Asked by the user on 2026-11-09 for a new Lean consumer, `ffprogress` (~/personal_projects/ffprogress), a port of the Python wrapper ~/scripts/ffprogress (dotfiles commit 02d6970): it spawns ffmpeg, reads its `-progress` from a pipe and its stderr from another, draws a progress bar with ETA, forwards TERM and HUP to ffmpeg, lets Ctrl-C reach ffmpeg (same process group) while the wrapper itself keeps running to reap it, and returns ffmpeg's exit status. What lean-posix lacks for it, all additions (no existing declaration changes):
+
+1. `kill` with any signal to a pid (today only `killNow`, SIGKILL), returning the errno (0 on success), e.g. so a wrapper can pass SIGTERM/SIGHUP on to its child; ESRCH for a process already gone must be distinguishable.
+2. A way to wait for chosen catchable signals (at least SIGTERM, SIGHUP, SIGINT) as events, in a kqueue of the caller's or one of its own (EVFILT_SIGNAL), telling which signal arrived. The disposition must be a caught no-op handler, not SIG_IGN: an ignored signal stays ignored across exec, so a child spawned afterwards (ffmpeg) would no longer stop on Ctrl-C; a caught one is reset to the default by exec. State in the doc comment what a child inherits and that installing it before spawning leaves no window where TERM kills the wrapper and orphans the child.
+3. `winSize` of a given descriptor (today stdout's only), so a program whose stdout is a pipe can size a status line for its stderr terminal.
+
+Tests in Tests/Main.lean (Lean only, per AGENTS.project.md): a signal sent with (1) to a spawned child ends it with that signal (`waitOutcome`); (2) reports a SIGTERM and a SIGHUP sent to the test process itself, in order, and a child spawned after installing it still dies of SIGINT; (3) on a pty's descriptor gives the size set with `setWinSize`.
+After this item lands, the consumer pins the new commit (tag `pin/<sha12>`, README "Use").

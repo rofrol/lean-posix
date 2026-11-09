@@ -1,5 +1,7 @@
 ## Next, in order
 
+j3aw7s lean-posix: send any signal to a process, wait for TERM/HUP/INT as kqueue events, and read the window size of any descriptor
+
 ## Proposed
 
 oukmiz termCtl's signal path allocates after raise: make the handler async-signal-safe
