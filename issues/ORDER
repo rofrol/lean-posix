@@ -9,3 +9,5 @@ gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the 
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 
 ## Needs a decision
+
+zcyzdk lean-posix: move the termCtl handler and terminal state into a C file built by Lake, with system headers and _Static_assert checks
