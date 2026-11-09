@@ -1,6 +1,5 @@
 ## Next, in order
 
-vmzqho lean-posix: the kq test hangs when the process's exit comes before its output's end
 oukmiz termCtl's signal path allocates after raise: make the handler async-signal-safe
 nhg7tl lean-posix: lockDir gives up when a signal interrupts its blocking flock
 jd6rjr lean-posix: openPty's master is made close-on-exec only after openpty returns, so a fork in another thread can inherit it
