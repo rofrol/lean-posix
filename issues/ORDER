@@ -16,6 +16,4 @@ umpom4 lean-posix: kqWait and kqWaitFor give a record of events instead of a bit
 
 ## Proposed
 
-mnksgg lean-posix: the lockDir EINTR test cannot tell lf_setlock's abort-safe sleep from another interruptible wait inside flock
-
 ## Needs a decision
