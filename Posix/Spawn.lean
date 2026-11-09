@@ -1,4 +1,5 @@
 import Std.Sync.Mutex
+import Std.Tactic.BVDecide
 import Posix.Fd
 
 /-!
@@ -141,6 +142,51 @@ or 128 plus the signal that ended it, as Lean's `Child.wait` gives them. Throws 
 `pid` is no child of this process to wait for. -/
 @[extern c inline "({ extern int waitpid(int, int*, int); extern int* __error(void); int s = 0, r; do r = waitpid((int)#1, &s, 0); while (r < 0 && *__error() == 4); r < 0 ? lean_io_result_mk_error(lean_decode_io_error(*__error(), NULL)) : lean_io_result_mk_ok(lean_box_uint32((s & 0x7f) == 0 ? (unsigned)((s >> 8) & 0xff) : 128u + (unsigned)(s & 0x7f))); })"]
 opaque waitpid (pid : UInt32) : IO UInt32
+
+/-- How a child ended: it exited with a code, or a signal ended it. Unlike
+`waitpid`'s number, a child that exits with 130 and one that SIGINT ends are
+told apart. -/
+inductive ExitOutcome where
+  | exited (code : UInt8)
+  | signaled (sig : UInt8)
+  deriving DecidableEq, Repr, Inhabited
+
+/-- Decodes a wait status from `waitpid(2)`: low 7 bits 0 is an exit, its code
+in bits 8 to 15 (WIFEXITED, WEXITSTATUS); otherwise the low 7 bits are the
+signal (WTERMSIG), the core-dump bit 0x80 dropped. Assumes the status is no
+stop report (low 7 bits 0x7f), which `waitOutcome` never passes on. -/
+def ExitOutcome.ofStatus (s : UInt32) : ExitOutcome :=
+  if s &&& 0x7f == 0 then .exited ((s >>> 8) &&& 0xff).toUInt8 else .signaled (s &&& 0x7f).toUInt8
+
+/-- Every exit code decodes to itself, as an exit. -/
+theorem ExitOutcome.ofStatus_exited (code : UInt8) :
+    ExitOutcome.ofStatus (code.toUInt32 <<< 8) = .exited code := by
+  have h1 : code.toUInt32 <<< 8 &&& 0x7f = 0 := by bv_decide
+  have h2 : ((code.toUInt32 <<< 8 >>> 8) &&& 0xff).toUInt8 = code := by bv_decide
+  simp [ofStatus, h1, h2]
+
+/-- Every signal (1 to 0x7e) decodes to itself, as a signal, with or without
+the core-dump bit, so it is never taken for an exit code. -/
+theorem ExitOutcome.ofStatus_signaled (sig : UInt8) (core : Bool) (h0 : sig ≠ 0) (h : sig < 0x7f) :
+    ExitOutcome.ofStatus (sig.toUInt32 ||| (if core then 0x80 else 0)) = .signaled sig := by
+  have h1 : ((sig.toUInt32 ||| (if core then 0x80 else 0)) &&& 0x7f == 0) = false := by
+    cases core <;> simp only [Bool.false_eq_true, ite_true, ite_false] <;> bv_decide
+  have h2 : ((sig.toUInt32 ||| (if core then 0x80 else 0)) &&& 0x7f).toUInt8 = sig := by
+    cases core <;> simp only [Bool.false_eq_true, ite_true, ite_false] <;> bv_decide
+  simp only [ofStatus, h1, h2, Bool.false_eq_true, ite_false]
+
+@[extern c inline "({ extern int waitpid(int, int*, int); extern int* __error(void); int s = 0, r; do r = waitpid((int)#1, &s, 0); while ((r < 0 && *__error() == 4) || (r >= 0 && (s & 0x7f) == 0x7f)); r < 0 ? lean_io_result_mk_error(lean_decode_io_error(*__error(), NULL)) : lean_io_result_mk_ok(lean_box_uint32((unsigned)s)); })"]
+private opaque waitStatus (pid : UInt32) : IO UInt32
+
+/-- Waits for the child `pid` to exit and reaps it, past any EINTR: whether it
+exited, with its code, or a signal ended it, with the signal. Throws when `pid`
+is no child of this process to wait for. `waitpid` gives the same end as one
+number. A stop is reported without WUNTRACED only for a traced child; this wait
+passes such a report by and resumes nothing, so it is not for a child this
+process traces (one that called PT_TRACE_ME), which would stay stopped and the
+wait blocked. -/
+def waitOutcome (pid : UInt32) : IO ExitOutcome :=
+  ExitOutcome.ofStatus <$> waitStatus pid
 
 /-- Writes all of `bytes` to `fd`, past any EINTR and short write: 0, or the errno of
 the write that failed (EPIPE when the reader is gone, as Lean ignores SIGPIPE). -/

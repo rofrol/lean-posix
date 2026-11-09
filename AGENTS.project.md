@@ -30,7 +30,7 @@
 There is no shared core beyond the convention every module follows: a
 descriptor or pid is a `UInt32`; a failure mostly comes back as a value (an
 errno, a large number, the high bit set with the errno, or an `Except`), as
-each doc comment states; `spawn`, `pipe` and `waitpid` throw, and
+each doc comment states; `spawn`, `pipe`, `waitpid` and `waitOutcome` throw, and
 `trySpawn` throws on a descriptor 0, 1 or 2. Whether a child inherits a
 descriptor made here is stated in its doc comment ("which no child
 inherits") where it is close-on-exec. `Posix.lean` imports
@@ -52,7 +52,8 @@ Modules, each under `Posix/`, all in `namespace Posix`:
 - `Spawn.lean` (imports `Fd`): `trySpawn`/`spawn` (fork, a close-on-exec
   result pipe, `execve` along `candidates`, the PATH lookup; optionally
   `setsid` and a controlling terminal; `SpawnFailure`, `inherit`, `devNull`),
-  `pipe`, `waitpid`, `writeAll`. `spawnRaw` is public but internal to
+  `pipe`, `waitpid`, `waitOutcome` (`ExitOutcome`: an exit code or a signal,
+  decoded by `ExitOutcome.ofStatus` with theorems), `writeAll`. `spawnRaw` is public but internal to
   `trySpawn`. One process-wide lock (`spawnLock`) serializes `pipe` and spawn.
 - `Lock.lean`: `lockFile`/`unlock`, `lockHanded` (a lock handed across
   exec; `lockHeld`, `lockElsewhere`), `lockDir`, `link`. `lockRaw` is public
@@ -71,7 +72,7 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   terminal state is process-global.
 
 Allowed dependency directions: `Spawn` and `Kqueue` may import `Fd`
-(`Spawn` also imports `Std.Sync.Mutex`); no other
+(`Spawn` also imports `Std.Sync.Mutex` and `Std.Tactic.BVDecide`); no other
 module imports another; nothing here imports a consumer. The tests import
 `Posix` only.
 

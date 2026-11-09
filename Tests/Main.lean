@@ -483,6 +483,17 @@ def spawns (t : T) (dir : System.FilePath) : IO Unit := do
   t.check "writeAll to a pipe with no reader gives EPIPE" ((← writeAll w "x".toUTF8) == 32)
   close w
   t.check "waitpid of no child throws" ((← (waitpid 1).toBaseIO) matches .error _)
+  -- waitOutcome: an exit of 130 and an end by SIGINT, one number to waitpid, apart.
+  let exited ← waitOutcome (← spawn #["/bin/sh", "-c", "exit 130"])
+  let signaled ← waitOutcome (← spawn #["/bin/sh", "-c", "kill -s INT $$"])
+  t.check "waitOutcome tells an exit of 130 from an end by SIGINT"
+    (exited == .exited 130 && signaled == .signaled 2) s!"{repr exited} {repr signaled}"
+  let a ← waitpid (← spawn #["/bin/sh", "-c", "exit 130"])
+  let b ← waitpid (← spawn #["/bin/sh", "-c", "kill -s INT $$"])
+  t.check "which waitpid gives as one number, 130" (a == 130 && b == 130) s!"{a} {b}"
+  let r ← waitOutcome (← spawn #["/bin/sh", "-c", "exit 0"])
+  t.check "waitOutcome gives an exit of 0" (r == .exited 0) s!"{repr r}"
+  t.check "waitOutcome of no child throws" ((← (waitOutcome 1).toBaseIO) matches .error _)
 
 /-- The output on the pty's master of `tests ARG` run with the slave as its stdio. -/
 def onPty (arg : String) : IO (String × UInt32) := do
