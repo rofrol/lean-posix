@@ -1,12 +1,13 @@
 # lean-posix
 
 POSIX calls Lean 4's library lacks, as Lean bindings, for macOS. The bindings of
-`Posix.Fd`, `Posix.Pty`, `Posix.Lock`, `Posix.Kqueue` and `Posix.Term` are C in
-`c/fd.c`, `c/pty.c`, `c/lock.c`, `c/kqueue.c` and `c/term.c`, which Lake compiles
-against the macOS SDK's headers; those of `Posix.Process` and `Posix.Spawn` are
-each one `@[extern c inline "..."]` expression that declares the C functions it
-calls, and `c/abi.c` checks the numbers and struct layouts those expressions
-write by hand against the SDK's headers. Every binding's contract is in its doc
+`Posix.Fd`, `Posix.Pty`, `Posix.Lock`, `Posix.Process`, `Posix.Kqueue` and
+`Posix.Term` are C in `c/fd.c`, `c/pty.c`, `c/lock.c`, `c/process.c`,
+`c/kqueue.c` and `c/term.c`, which Lake compiles against the macOS SDK's
+headers; those of `Posix.Spawn` are each one `@[extern c inline "..."]`
+expression that declares the C functions it calls, and `c/abi.c` checks the
+numbers and struct layouts those expressions write by hand against the SDK's
+headers. Every binding's contract is in its doc
 comment.
 
 Written for rr's watcher, supervisor and terminal UI, and kept apart so that

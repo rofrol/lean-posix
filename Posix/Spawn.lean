@@ -36,7 +36,7 @@ child, as with Lean's spawn.
 
 The numbers are macOS's: F_GETFD 1, F_SETFD 2, FD_CLOEXEC 1, F_DUPFD_CLOEXEC 67, O_RDWR 2,
 O_CLOEXEC 0x1000000, EINTR 4, ENOENT 2, ENOTDIR 20, EACCES 13, EIO 5, TIOCSCTTY
-0x20007461.
+0x20007461, SIGKILL 9, the stop status's low 7 bits 0x7f.
 -/
 
 namespace Posix

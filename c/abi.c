@@ -8,12 +8,9 @@
  */
 #include <errno.h>
 #include <fcntl.h>
-#include <libproc.h>
 #include <signal.h>
 #include <stddef.h>
 #include <sys/ioctl.h>
-#include <sys/proc_info.h>
-#include <sys/resource.h>
 #include <sys/wait.h>
 
 #define SAME(name, value) _Static_assert((name) == (value), #name " is " #value)
@@ -34,13 +31,7 @@ SAME(ENOTTY, 25);
 SAME(EWOULDBLOCK, 35);
 
 /* signals and their dispositions */
-SAME(SIGHUP, 1);
-SAME(SIGINT, 2);
-SAME(SIGQUIT, 3);
 SAME(SIGKILL, 9);
-SAME(SIGPIPE, 13);
-SAME(SIGTERM, 15);
-SAME(SIGTSTP, 18);
 SAME(SA_RESTART, 2);
 
 /* open and fcntl */
@@ -54,9 +45,7 @@ SAME(FD_CLOEXEC, 1);
 /* ioctl */
 SAME(TIOCSCTTY, 0x20007461UL);
 
-/* resources, process information, wait status */
-SAME(RUSAGE_SELF, 0);
-SAME(PROC_PIDTBSDINFO, 3);
+/* wait status */
 SAME(_WSTOPPED, 0x7f);
 
 /* struct layouts, as the expressions declare them */
@@ -69,12 +58,3 @@ AT(struct sigaction, sa_handler, 0);
 AT(struct sigaction, sa_mask, 8);
 AT(struct sigaction, sa_flags, 12);
 _Static_assert(sizeof(sigset_t) == 4, "sigset_t is 32 bits");
-
-/* `getrusage` into 40 longs, the peak resident set the fifth */
-_Static_assert(sizeof(struct rusage) <= 40 * sizeof(long), "struct rusage fits 40 longs");
-AT(struct rusage, ru_maxrss, 4 * sizeof(long));
-
-/* `proc_pidinfo` into 136 bytes */
-_Static_assert(sizeof(struct proc_bsdinfo) == 136, "struct proc_bsdinfo is 136 bytes");
-AT(struct proc_bsdinfo, pbi_start_tvsec, 120);
-AT(struct proc_bsdinfo, pbi_start_tvusec, 128);

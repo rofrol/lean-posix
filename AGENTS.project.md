@@ -60,7 +60,8 @@ Modules, each under `Posix/`, all in `namespace Posix`:
 - `Process.lean`: `exec` (`execvp` in place), `execResume` (`execv` of
   `path --resume`), `killNow` (SIGKILL to a process or group), `kill` (any signal, the errno), `alarm`,
   `defaultSignals`, `defaultPipe`, `processStart` (`proc_pidinfo` start time),
-  `peakRss`.
+  `peakRss`. Its C is `c/process.c`, with `struct proc_bsdinfo`,
+  `struct rusage` and the constants from the SDK's headers.
 - `Spawn.lean` (imports `Fd`): `trySpawn`/`spawn` (fork, a close-on-exec
   result pipe, `execve` along `candidates`, the PATH lookup; optionally
   `setsid` and a controlling terminal; `SpawnFailure`, `inherit`, `devNull`),

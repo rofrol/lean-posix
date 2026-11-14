@@ -3,10 +3,8 @@
 
 Lean's `IO.Process` spawns and waits; it cannot become another program in the same
 process, kill a process group, or put signals back to their defaults. The numbers
-are macOS's: SIGHUP 1, SIGINT 2, SIGQUIT 3, SIGKILL 9, SIGPIPE 13, SIGTERM 15,
-SIGTSTP 18, ESRCH 3, EPERM 1, EINVAL 22,
-RUSAGE_SELF 0, PROC_PIDTBSDINFO 3; `struct proc_bsdinfo` is 136 bytes, its
-`pbi_start_tvsec` and `pbi_start_tvusec` at 120 and 128.
+are macOS's: ESRCH 3, EPERM 1, EINVAL 22. The C is `c/process.c`, which takes
+`struct proc_bsdinfo`, `struct rusage` and every constant from the SDK's headers.
 -/
 
 namespace Posix
@@ -14,16 +12,16 @@ namespace Posix
 /-- Becomes the command `argv` (looked up on `PATH`, `argv[0]` its name), in this
 process with this environment. Should that fail it says why after `what` on
 stderr, and returns. -/
-@[extern c inline "({ extern int execvp(const char*, char* const*); extern void perror(const char*); size_t n = lean_array_size(#1); char** v = malloc((n + 1) * sizeof(char*)); for (size_t i = 0; i < n; i++) v[i] = (char*)lean_string_cstr(lean_array_get_core(#1, i)); v[n] = 0; execvp(v[0], v); perror(lean_string_cstr(#2)); lean_io_result_mk_ok(lean_box(0)); })"]
+@[extern "lean_posix_exec"]
 opaque exec (argv : @& Array String) (what : @& String) : IO Unit
 
 /-- Executes `path` as `path --resume`, in this process, with this environment;
 returns only when that fails, with the errno. -/
-@[extern c inline "({ extern int execv(const char*, char* const*); extern int* __error(void); const char* a[] = {lean_string_cstr(#1), \"--resume\", 0}; execv(lean_string_cstr(#1), (char* const*)a); lean_io_result_mk_ok(lean_box_uint32((unsigned)*__error())); })"]
+@[extern "lean_posix_exec_resume"]
 opaque execResume (path : @& String) : IO UInt32
 
 /-- SIGKILL to `pid`; `pid` negative is a process group. -/
-@[extern c inline "({ extern int kill(int, int); kill((int)#1, 9); lean_io_result_mk_ok(lean_box(0)); })"]
+@[extern "lean_posix_kill_now"]
 opaque killNow (pid : Int32) : IO Unit
 
 /-- Sends signal `sig` to `pid` (`pid` below -1 is the process group `-pid`, 0 the
@@ -33,31 +31,31 @@ or the errno: ESRCH (3) when no process has that pid; EPERM (1) when it is not t
 caller's to signal; EINVAL (22) for no such signal. A child that exited and is not
 reaped yet still has its pid: the signal is "sent" (0) and does nothing (measured on
 macOS 27), so ESRCH means the pid is free, and may already be another process's. -/
-@[extern c inline "({ extern int kill(int, int); extern int* __error(void); lean_io_result_mk_ok(lean_box_uint32(kill((int)#1, (int)#2) == 0 ? 0u : (unsigned)*__error())); })"]
+@[extern "lean_posix_kill"]
 opaque kill (pid : Int32) (sig : UInt32) : IO UInt32
 
 /-- SIGALRM after `seconds`, or none with zero. Its default ends the process. -/
-@[extern c inline "({ extern unsigned alarm(unsigned); alarm(#1); lean_io_result_mk_ok(lean_box(0)); })"]
+@[extern "lean_posix_alarm"]
 opaque alarm (seconds : UInt32) : IO Unit
 
 /-- The defaults of SIGHUP, SIGINT, SIGQUIT, SIGPIPE, SIGTERM and SIGTSTP, for a child
 before it executes its command: an ignored signal survives exec, Lean ignores SIGPIPE,
 and `termCtl 1001` ignores SIGTSTP. -/
-@[extern c inline "({ extern void (*signal(int, void (*)(int)))(int); int s[] = {1, 2, 3, 13, 15, 18}; for (int i = 0; i < 6; i++) signal(s[i], 0); lean_io_result_mk_ok(lean_box(0)); })"]
+@[extern "lean_posix_default_signals"]
 opaque defaultSignals : IO Unit
 
 /-- The default of SIGPIPE alone, for a process about to execute another program in
 its place that keeps every other signal as its parent gave it: Lean ignores SIGPIPE
 in every program it builds, and an ignored signal survives exec, while a signal its
 parent ignored, such as SIGINT and SIGQUIT in a shell's `&` job, stays ignored. -/
-@[extern c inline "({ extern void (*signal(int, void (*)(int)))(int); signal(13, 0); lean_io_result_mk_ok(lean_box(0)); })"]
+@[extern "lean_posix_default_pipe"]
 opaque defaultPipe : IO Unit
 
 /-- When process `pid` started, in microseconds since the Unix epoch, as macOS's
 `proc_pidinfo` (`PROC_PIDTBSDINFO`) gives it, with the high bit clear; or the high
 bit or-ed with the errno when it cannot be read (ESRCH: no live process has that
 pid). `processStart` gives the two apart. -/
-@[extern c inline "({ extern int proc_pidinfo(int, int, unsigned long long, void*, int); extern int* __error(void); unsigned char b[136]; unsigned long long sec, usec; uint64_t r; if (proc_pidinfo((int)#1, 3, 0, b, 136) == 136) { __builtin_memcpy(&sec, b + 120, 8); __builtin_memcpy(&usec, b + 128, 8); r = sec * 1000000ull + usec; } else { int e = *__error(); r = (1ull << 63) | (uint64_t)(e != 0 ? e : 5); } lean_io_result_mk_ok(lean_box_uint64(r)); })"]
+@[extern "lean_posix_process_start_raw"]
 opaque processStartRaw (pid : UInt32) : IO UInt64
 
 /-- When process `pid` started, in microseconds since the Unix epoch: a process and
@@ -72,7 +70,7 @@ def processStart (pid : UInt32) : IO (Except UInt32 Nat) := do
   return if r &&& ((1 : UInt64) <<< 63) == 0 then .ok r.toNat else .error (r &&& 0xffffffff).toUInt32
 
 /-- The process's peak resident set, in bytes, as macOS's `getrusage` gives it. -/
-@[extern c inline "({ extern int getrusage(int, void*); long r[40]; getrusage(0, r); lean_io_result_mk_ok(lean_box_usize((size_t)r[4])); })"]
+@[extern "lean_posix_peak_rss"]
 opaque peakRss : IO USize
 
 end Posix
