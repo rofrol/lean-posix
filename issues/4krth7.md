@@ -1,0 +1,3 @@
+lean-posix: drop c/abi.c's struct sigaction, sigset_t and SA_RESTART assertions, which no inline expression uses
+
+Seen while moving the Process bindings to c/process.c (vq7btc): `c/abi.c` checks numbers and layouts that the `@[extern c inline]` expressions in `Posix/` write by hand, but no expression in `Posix/` declares `struct sigaction` or uses SA_RESTART any more (fff search for `sigaction` and `SA_RESTART` in `Posix/` finds only doc text in `Posix/Kqueue.lean` and `Posix/Lock.lean`); Kqueue and Term are C files that take them from `<signal.h>`. Remove the `/* { void (*h)(int); unsigned m; int f; } */` block and `SAME(SA_RESTART, 2)` from `c/abi.c`. Check: `lake build`, `lake test`.

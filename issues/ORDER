@@ -1,6 +1,5 @@
 ## Next, in order
 
-vq7btc lean-posix: move the Process bindings into the C file, with <libproc.h> and <signal.h>
 mtobhv lean-posix: move Spawn's pipe, waitpid, waitStatus and writeAll into the C file; spawnRaw waits for 53zc6j
 quboep lean-posix: design how 53zc6j's ctty helper executable is built, shipped and found by consumers
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
@@ -16,5 +15,7 @@ umpom4 lean-posix: kqWait and kqWaitFor give a record of events instead of a bit
 2kfkur lean-posix: note for 53zc6j: trySpawn's fork kills children before exec in a multithreaded Lean process (tuvst2 result)
 l7upxo lean-posix: assert the inline expressions' hand-written function declarations against the SDK in c/abi.c
 s5yrc7 lean-posix: move catchSignals' handler into c/ as a true void handler(int)
+4krth7 lean-posix: drop c/abi.c's struct sigaction, sigset_t and SA_RESTART assertions, which no inline expression uses
+tuw6vt lean-posix: Posix.exec with an empty argv passes NULL to execvp
 
 ## Needs a decision

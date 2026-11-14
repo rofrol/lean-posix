@@ -1,0 +1,3 @@
+lean-posix: Posix.exec with an empty argv passes NULL to execvp
+
+Found in consult round 20261114-182759-0d48 (argon) on vq7btc; it was the same before that change. `lean_posix_exec` in `c/process.c` calls `execvp(v[0], v)` with `v[0] == NULL` when `argv` is empty, which POSIX leaves undefined (EFAULT or a crash). The doc comment does not say what an empty `argv` does. Options: refuse it without calling execvp (perror-style message after `what`, then return, as on other failures), or document it as a precondition. Either changes or states the public contract of `Posix.exec`, so it needs the owner's choice. Check: a test that `exec #[] "x"` returns and prints the message.
