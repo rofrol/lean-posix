@@ -19,7 +19,6 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/wait.h>
-#include <termios.h>
 
 #define SAME(name, value) _Static_assert((name) == (value), #name " is " #value)
 
@@ -53,7 +52,6 @@ SAME(O_RDONLY, 0);
 SAME(O_RDWR, 2);
 SAME(O_NONBLOCK, 4);
 SAME(O_CREAT, 0x200);
-SAME(O_NOCTTY, 0x20000);
 SAME(O_DIRECTORY, 0x100000);
 SAME(O_CLOEXEC, 0x1000000);
 SAME(F_GETFD, 1);
@@ -67,12 +65,9 @@ SAME(FD_CLOEXEC, 1);
 SAME(LOCK_EX, 2);
 SAME(LOCK_NB, 4);
 
-/* ioctl and termios */
+/* ioctl */
 SAME(FIONREAD, 0x4004667fUL);
-SAME(TIOCGWINSZ, 0x40087468UL);
-SAME(TIOCSWINSZ, 0x80087467UL);
 SAME(TIOCSCTTY, 0x20007461UL);
-SAME(TCSAFLUSH, 2);
 
 /* resources, process information, wait status */
 SAME(RUSAGE_SELF, 0);
@@ -89,11 +84,6 @@ AT(struct sigaction, sa_handler, 0);
 AT(struct sigaction, sa_mask, 8);
 AT(struct sigaction, sa_flags, 12);
 _Static_assert(sizeof(sigset_t) == 4, "sigset_t is 32 bits");
-
-/* four unsigned shorts, rows first */
-_Static_assert(sizeof(struct winsize) == 8, "struct winsize is 8 bytes");
-AT(struct winsize, ws_row, 0);
-AT(struct winsize, ws_col, 2);
 
 /* { long s; int us; } */
 _Static_assert(sizeof(struct timeval) == 16 && sizeof(((struct timeval *)0)->tv_usec) == 4,
@@ -119,6 +109,3 @@ AT(struct rusage, ru_maxrss, 4 * sizeof(long));
 _Static_assert(sizeof(struct proc_bsdinfo) == 136, "struct proc_bsdinfo is 136 bytes");
 AT(struct proc_bsdinfo, pbi_start_tvsec, 120);
 AT(struct proc_bsdinfo, pbi_start_tvusec, 128);
-
-/* `cfmakeraw` into 32 unsigned longs (openPty) */
-_Static_assert(sizeof(struct termios) <= 32 * sizeof(unsigned long), "struct termios fits openPty's buffer");

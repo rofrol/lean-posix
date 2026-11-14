@@ -1,10 +1,8 @@
 /-!
 # Terminals: a pty, a controlling terminal, the window size
 
-The numbers are macOS's: O_RDWR 2, O_NOCTTY 0x20000, O_CLOEXEC 0x1000000,
-TCSAFLUSH 2, TIOCGWINSZ 0x40087468,
-TIOCSWINSZ 0x80087467, ENOTTY 25, EBADF 9; `struct winsize` is four unsigned
-shorts, rows first.
+The C is `c/pty.c`, which takes `struct termios`, `struct winsize` and every
+constant from the SDK's headers.
 -/
 
 namespace Posix
@@ -20,8 +18,7 @@ slave are gone. To give a child the slave, make it the child's 0, 1 or 2
 that number, or a `dup2` onto another number, which leaves the copy without it).
 `loginTty` in a forked child dup2s it onto 0, 1 and 2, so a slave that is itself
 0, 1 or 2 (stdio closed before `openPty`) stays close-on-exec at that number.
-`cfmakeraw` fills a `struct termios`, which fits in the buffer. Both are large
-numbers when no pty can be had.
+Both are large numbers when no pty can be had.
 
 The steps are `openpty`'s, but the master is opened by `posix_openpt` with
 O_CLOEXEC, which POSIX.1-2024 specifies for it, and the slave by `open` with
@@ -29,22 +26,22 @@ O_CLOEXEC, rather than made close-on-exec by a later `fcntl`. macOS's
 grantpt(3) lists only O_RDWR and O_NOCTTY and returns EINVAL for "an invalid mode bit", so a system that refused O_CLOEXEC
 would make `openPty` fail rather than hand out a master a program inherits.
 `lake test` checks that a child's program has neither. -/
-@[extern c inline "({ extern int posix_openpt(int); extern int grantpt(int); extern int unlockpt(int); extern int ptsname_r(int, char*, unsigned long); extern int open(const char*, int, ...); extern int close(int); extern void cfmakeraw(void*); extern int tcsetattr(int, int, const void*); unsigned long t[32] = {0}; cfmakeraw(t); char name[128]; int s = -1; int m = posix_openpt(0x2 | 0x20000 | 0x1000000); if (m >= 0 && (grantpt(m) != 0 || unlockpt(m) != 0 || ptsname_r(m, name, sizeof name) != 0 || (s = open(name, 0x2 | 0x20000 | 0x1000000)) < 0 || tcsetattr(s, 2, t) != 0)) { if (s >= 0) close(s); close(m); m = -1; s = -1; } lean_object* p = lean_alloc_ctor(0, 2, 0); lean_ctor_set(p, 0, lean_box_uint32((unsigned)m)); lean_ctor_set(p, 1, lean_box_uint32((unsigned)s)); lean_io_result_mk_ok(p); })"]
+@[extern "lean_posix_open_pty"]
 opaque openPty : IO (UInt32 × UInt32)
 
 /-- A new session with `fd`, a terminal, as its controlling terminal and stdio: 0,
 or a large number when it failed. For a child before it executes its command. -/
-@[extern c inline "({ extern int login_tty(int); lean_io_result_mk_ok(lean_box_uint32((unsigned)login_tty((int)#1))); })"]
+@[extern "lean_posix_login_tty"]
 opaque loginTty (fd : UInt32) : IO UInt32
 
 /-- The rows and columns of the terminal at stdout, or 24 by 80 when it does not
 say. -/
-@[extern c inline "({ extern int ioctl(int, unsigned long, ...); unsigned short w[4] = {0}; int ok = ioctl(1, 0x40087468UL, w) == 0 && w[0] > 0 && w[1] > 0; lean_object* p = lean_alloc_ctor(0, 2, 0); lean_ctor_set(p, 0, lean_box_uint32(ok ? w[0] : 24)); lean_ctor_set(p, 1, lean_box_uint32(ok ? w[1] : 80)); lean_io_result_mk_ok(p); })"]
+@[extern "lean_posix_win_size"]
 opaque winSize : IO (UInt32 × UInt32)
 
 /-- `winSizeOf`'s result, encoded: rows in bits 16 to 31 and columns in bits 0 to
 15, or the high bit or-ed with the errno. -/
-@[extern c inline "({ extern int ioctl(int, unsigned long, ...); extern int* __error(void); unsigned short w[4] = {0}; uint64_t r = ioctl((int)#1, 0x40087468UL, w) == 0 ? ((uint64_t)w[0] << 16) | w[1] : (1ull << 63) | (unsigned)*__error(); lean_io_result_mk_ok(lean_box_uint64(r)); })"]
+@[extern "lean_posix_win_size_raw"]
 private opaque winSizeRaw (fd : UInt32) : IO UInt64
 
 /-- The rows and columns of the terminal at `fd`, as it says them (0 by 0 when
@@ -59,7 +56,7 @@ def winSizeOf (fd : UInt32) : IO (Except UInt32 (UInt32 × UInt32)) := do
 /-- Sets the size of the terminal at `fd`, a pty's master or slave, to `rows` by
 `cols`, which sends SIGWINCH to the foreground process group of the session it
 controls: 0, or the errno. -/
-@[extern c inline "({ extern int ioctl(int, unsigned long, ...); extern int* __error(void); unsigned short w[4] = {(unsigned short)#2, (unsigned short)#3, 0, 0}; lean_io_result_mk_ok(lean_box_uint32(ioctl((int)#1, 0x80087467UL, w) == 0 ? 0u : (unsigned)*__error())); })"]
+@[extern "lean_posix_set_win_size"]
 opaque setWinSize (fd rows cols : UInt32) : IO UInt32
 
 end Posix

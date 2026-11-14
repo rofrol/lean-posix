@@ -2,7 +2,8 @@
 
 POSIX calls Lean 4's library lacks, as Lean bindings, for macOS. Most bindings
 are one `@[extern c inline "..."]` expression that declares the C functions it
-calls; the terminal's (`Posix.termCtl`) is C in `c/term.c`, which Lake compiles
+calls; the terminal's (`Posix.termCtl`), the kqueue's and the pty's are C in
+`c/term.c`, `c/kqueue.c` and `c/pty.c`, which Lake compiles
 against the macOS SDK's headers, and `c/abi.c` checks the numbers and struct
 layouts the expressions write by hand against those headers. Every binding's
 contract is in its doc comment.
@@ -38,7 +39,7 @@ nor tell a program whose exec failed from one that ran and died.
 macOS only: the constants (flags, errnos, ioctl numbers, struct layouts,
 `__error()` for errno) are macOS's, written as numbers in each inline expression,
 listed in each module's header and checked against the SDK by `c/abi.c`; the C
-files `c/term.c` and `c/kqueue.c` take them from the SDK's headers.
+files `c/term.c`, `c/kqueue.c` and `c/pty.c` take them from the SDK's headers.
 
 Building needs the macOS SDK, from Xcode or the Command Line Tools
 (`xcode-select --install`): Lake finds it with `xcrun --show-sdk-path` and

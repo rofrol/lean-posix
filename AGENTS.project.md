@@ -52,7 +52,9 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   bytes without waiting), `handleFd` (the descriptor under an
   `IO.FS.Handle`), `isatty`, `strerror`, `setTimes` (`utimes`).
 - `Pty.lean`: `openPty` (raw), `loginTty`, `winSize` (stdout's),
-  `winSizeOf` (any descriptor's, or the errno), `setWinSize`.
+  `winSizeOf` (any descriptor's, or the errno), `setWinSize`. Its C is
+  `c/pty.c`, with `struct termios`, `struct winsize` and the constants from
+  the SDK's headers.
 - `Process.lean`: `exec` (`execvp` in place), `execResume` (`execv` of
   `path --resume`), `killNow` (SIGKILL to a process or group), `kill` (any signal, the errno), `alarm`,
   `defaultSignals`, `defaultPipe`, `processStart` (`proc_pidinfo` start time),
