@@ -3,19 +3,18 @@ open Lake DSL
 
 package «lean-posix»
 
-/-- The bindings, `Posix.*`: most are a C expression that declares what it calls;
-`termCtl`, the kqueue, pty and descriptor bindings are C functions of
-`c/term.c`, `c/kqueue.c`, `c/pty.c` and `c/fd.c`,
+/-- The bindings, `Posix.*`: those of `Posix.Process` and `Posix.Spawn` are C
+expressions that declare what they call; the others are C functions of `c/*.c`,
 linked from `leanposixc`. -/
 @[default_target]
 lean_lib Posix
 
 /-- `c/*.c`, compiled with the Lean toolchain's clang against the macOS SDK (Xcode
 or the Command Line Tools, found by `xcrun --show-sdk-path` at build time) and
-Lean's headers, every warning an error: `c/term.c`, the terminal behind
-`Posix.termCtl`, `c/kqueue.c`, `c/pty.c` and `c/fd.c`, the bindings of
-`Posix/Kqueue.lean`, `Posix/Pty.lean` and `Posix/Fd.lean`, and
-`c/abi.c`, which links nothing and fails the build when a
+Lean's headers, every warning an error: `c/term.c`, `c/kqueue.c`, `c/pty.c`,
+`c/fd.c` and `c/lock.c`, the bindings of `Posix/Term.lean`, `Posix/Kqueue.lean`,
+`Posix/Pty.lean`, `Posix/Fd.lean` and `Posix/Lock.lean`, and `c/abi.c`, which
+links nothing and fails the build when a
 number or struct layout an inline expression writes by hand differs from the
 SDK's. The SDK's path and build version are part of each object's trace, so
 another SDK compiles and checks them again. A default target, so `lake build`

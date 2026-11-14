@@ -1,13 +1,13 @@
 # lean-posix
 
-POSIX calls Lean 4's library lacks, as Lean bindings, for macOS. Most bindings
-are one `@[extern c inline "..."]` expression that declares the C functions it
-calls; the terminal's (`Posix.termCtl`), the kqueue's, the pty's and the
-descriptors' are C in `c/term.c`, `c/kqueue.c`, `c/pty.c` and `c/fd.c`, which
-Lake compiles
-against the macOS SDK's headers, and `c/abi.c` checks the numbers and struct
-layouts the expressions write by hand against those headers. Every binding's
-contract is in its doc comment.
+POSIX calls Lean 4's library lacks, as Lean bindings, for macOS. The bindings of
+`Posix.Fd`, `Posix.Pty`, `Posix.Lock`, `Posix.Kqueue` and `Posix.Term` are C in
+`c/fd.c`, `c/pty.c`, `c/lock.c`, `c/kqueue.c` and `c/term.c`, which Lake compiles
+against the macOS SDK's headers; those of `Posix.Process` and `Posix.Spawn` are
+each one `@[extern c inline "..."]` expression that declares the C functions it
+calls, and `c/abi.c` checks the numbers and struct layouts those expressions
+write by hand against the SDK's headers. Every binding's contract is in its doc
+comment.
 
 Written for rr's watcher, supervisor and terminal UI, and kept apart so that
 their shells hold no C of their own.
@@ -40,7 +40,7 @@ nor tell a program whose exec failed from one that ran and died.
 macOS only: the constants (flags, errnos, ioctl numbers, struct layouts,
 `__error()` for errno) are macOS's, written as numbers in each inline expression,
 listed in each module's header and checked against the SDK by `c/abi.c`; the C
-files `c/term.c`, `c/kqueue.c`, `c/pty.c` and `c/fd.c` take them from the SDK's headers.
+files take them from the SDK's headers.
 
 Building needs the macOS SDK, from Xcode or the Command Line Tools
 (`xcode-select --install`): Lake finds it with `xcrun --show-sdk-path` and

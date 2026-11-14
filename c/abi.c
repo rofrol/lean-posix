@@ -11,11 +11,9 @@
 #include <libproc.h>
 #include <signal.h>
 #include <stddef.h>
-#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/proc_info.h>
 #include <sys/resource.h>
-#include <sys/stat.h>
 #include <sys/wait.h>
 
 #define SAME(name, value) _Static_assert((name) == (value), #name " is " #value)
@@ -46,19 +44,12 @@ SAME(SIGTSTP, 18);
 SAME(SA_RESTART, 2);
 
 /* open and fcntl */
-SAME(O_RDONLY, 0);
 SAME(O_RDWR, 2);
-SAME(O_CREAT, 0x200);
-SAME(O_DIRECTORY, 0x100000);
 SAME(O_CLOEXEC, 0x1000000);
 SAME(F_GETFD, 1);
 SAME(F_SETFD, 2);
 SAME(F_DUPFD_CLOEXEC, 67);
 SAME(FD_CLOEXEC, 1);
-
-/* flock */
-SAME(LOCK_EX, 2);
-SAME(LOCK_NB, 4);
 
 /* ioctl */
 SAME(TIOCSCTTY, 0x20007461UL);
@@ -78,15 +69,6 @@ AT(struct sigaction, sa_handler, 0);
 AT(struct sigaction, sa_mask, 8);
 AT(struct sigaction, sa_flags, 12);
 _Static_assert(sizeof(sigset_t) == 4, "sigset_t is 32 bits");
-
-/* `fstat64` and `stat64` into 32 unsigned long longs (lockHanded): st_dev (32 bits) at
- * 0, st_ino at 8. Their `struct stat64` is the SDK's `struct
- * stat` with 64-bit inodes: the only one on arm64, which declares no `struct
- * stat64`, and the default on x86_64. */
-_Static_assert(sizeof(struct stat) == 144, "struct stat is 144 bytes");
-AT(struct stat, st_dev, 0);
-_Static_assert(sizeof(((struct stat *)0)->st_dev) == 4, "st_dev is 32 bits");
-AT(struct stat, st_ino, 8);
 
 /* `getrusage` into 40 longs, the peak resident set the fifth */
 _Static_assert(sizeof(struct rusage) <= 40 * sizeof(long), "struct rusage fits 40 longs");

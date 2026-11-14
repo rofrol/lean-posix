@@ -69,7 +69,8 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   `trySpawn`. One process-wide lock (`spawnLock`) serializes `pipe` and spawn.
 - `Lock.lean`: `lockFile`/`unlock`, `lockHanded` (a lock handed across
   exec; `lockHeld`, `lockElsewhere`), `lockDir`, `link`. `lockRaw` is public
-  but internal to `lockFile`.
+  but internal to `lockFile`. Its C is `c/lock.c`, with `struct stat` and
+  the constants from the SDK's headers.
 - `Kqueue.lean` (imports `Fd`): four kinds of waiting. A process and its
   output pipe and a directory (`openEvents`, `watchSession`, `nextEvent`,
   `unwatchRead`); a full-screen program's stdin, SIGWINCH, files and process
