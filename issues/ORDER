@@ -1,6 +1,5 @@
 ## Next, in order
 
-quboep lean-posix: design how 53zc6j's ctty helper executable is built, shipped and found by consumers
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 qgxw6v lean-posix: three bindings rr2 needs, in one pin: a session kill, a one-descriptor append, and a spawn that hands chosen descriptors to the child only
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
@@ -16,5 +15,6 @@ l7upxo lean-posix: assert the inline expressions' hand-written function declarat
 s5yrc7 lean-posix: move catchSignals' handler into c/ as a true void handler(int)
 4krth7 lean-posix: drop c/abi.c's struct sigaction, sigset_t and SA_RESTART assertions, which no inline expression uses
 tuw6vt lean-posix: Posix.exec with an empty argv passes NULL to execvp
+yjesyi lean-posix: note for 53zc6j: the ctty helper's packaging waits on the owner's choice in docs/decisions/0001-ctty-helper.md (quboep result)
 
 ## Needs a decision
