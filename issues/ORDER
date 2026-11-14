@@ -1,6 +1,5 @@
 ## Next, in order
 
-53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 qgxw6v lean-posix: three bindings rr2 needs, in one pin: a session kill, a one-descriptor append, and a spawn that hands chosen descriptors to the child only
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
 x3fn73 lean-posix: typed results for watch, openEvents and watchSession
@@ -15,5 +14,7 @@ l7upxo lean-posix: assert the inline expressions' hand-written function declarat
 s5yrc7 lean-posix: move catchSignals' handler into c/ as a true void handler(int)
 4krth7 lean-posix: drop c/abi.c's struct sigaction, sigset_t and SA_RESTART assertions, which no inline expression uses
 tuw6vt lean-posix: Posix.exec with an empty argv passes NULL to execvp
+7jmon7 lean-posix: retire c/abi.c and the inline-expression rules now that Posix/ has no extern c inline
+pms2lm lean-posix: a ctty spawn near ARG_MAX fails at the helper where the program alone would start
 
 ## Needs a decision

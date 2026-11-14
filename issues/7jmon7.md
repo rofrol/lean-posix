@@ -1,0 +1,5 @@
+lean-posix: retire c/abi.c and the inline-expression rules now that Posix/ has no extern c inline
+
+Found while doing 53zc6j, which replaced the last `@[extern c inline]` expression in `Posix/` (`spawnRaw`) with C in `c/spawn.c`. `c/abi.c` exists to assert the numbers and struct layouts that such expressions write by hand (its header comment), and `AGENTS.project.md` ("macOS only" rule, the `c/abi.c` line of the architecture map), `README.md` ("Platform") and `lakefile.lean` (the `leanposixc` doc comment) still describe expressions that write numbers by hand. None remains in `Posix/`; `Diag/SpawnStress.lean` has inline expressions without hand-written constants. This supersedes the queued items 4krth7 (drop some of `c/abi.c`'s assertions) and l7upxo (assert the expressions' hand-written function declarations), which have nothing left to apply to.
+
+Proposed: delete `c/abi.c`, reword the rule and the documents to say that bindings are C in `c/*.c` with the SDK's headers, and finish 4krth7 and l7upxo as superseded. Check: `lake build` and `lake test` green.
