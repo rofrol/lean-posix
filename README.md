@@ -35,9 +35,10 @@ nor tell a program whose exec failed from one that ran and died.
 
 ## Platform
 
-macOS only: the constants (flags, errnos, ioctl numbers, `struct kevent`'s
-layout, `__error()` for errno) are macOS's, written as numbers in each expression,
-listed in each module's header and checked against the SDK by `c/abi.c`.
+macOS only: the constants (flags, errnos, ioctl numbers, struct layouts,
+`__error()` for errno) are macOS's, written as numbers in each inline expression,
+listed in each module's header and checked against the SDK by `c/abi.c`; the C
+files `c/term.c` and `c/kqueue.c` take them from the SDK's headers.
 
 Building needs the macOS SDK, from Xcode or the Command Line Tools
 (`xcode-select --install`): Lake finds it with `xcrun --show-sdk-path` and

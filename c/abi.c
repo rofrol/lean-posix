@@ -11,7 +11,6 @@
 #include <libproc.h>
 #include <signal.h>
 #include <stddef.h>
-#include <sys/event.h>
 #include <sys/file.h>
 #include <sys/filio.h>
 #include <sys/ioctl.h>
@@ -21,7 +20,6 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <termios.h>
-#include <time.h>
 
 #define SAME(name, value) _Static_assert((name) == (value), #name " is " #value)
 
@@ -47,10 +45,7 @@ SAME(SIGQUIT, 3);
 SAME(SIGKILL, 9);
 SAME(SIGPIPE, 13);
 SAME(SIGTERM, 15);
-SAME(SIGSTOP, 17);
 SAME(SIGTSTP, 18);
-SAME(SIGWINCH, 28);
-SAME(NSIG, 32);
 SAME(SA_RESTART, 2);
 
 /* open and fcntl */
@@ -58,7 +53,6 @@ SAME(O_RDONLY, 0);
 SAME(O_RDWR, 2);
 SAME(O_NONBLOCK, 4);
 SAME(O_CREAT, 0x200);
-SAME(O_EVTONLY, 0x8000);
 SAME(O_NOCTTY, 0x20000);
 SAME(O_DIRECTORY, 0x100000);
 SAME(O_CLOEXEC, 0x1000000);
@@ -80,24 +74,7 @@ SAME(TIOCSWINSZ, 0x80087467UL);
 SAME(TIOCSCTTY, 0x20007461UL);
 SAME(TCSAFLUSH, 2);
 
-/* kqueue */
-SAME(EVFILT_READ, -1);
-SAME(EVFILT_VNODE, -4);
-SAME(EVFILT_PROC, -5);
-SAME(EVFILT_SIGNAL, -6);
-SAME(EV_ADD, 1);
-SAME(EV_DELETE, 2);
-SAME(EV_ONESHOT, 0x10);
-SAME(EV_CLEAR, 0x20);
-SAME(EV_EOF, 0x8000);
-SAME(NOTE_DELETE, 1);
-SAME(NOTE_WRITE, 2);
-SAME(NOTE_EXTEND, 4);
-SAME(NOTE_RENAME, 0x20);
-SAME(NOTE_EXIT, 0x80000000U);
-
-/* clocks, resources, process information, wait status */
-SAME(CLOCK_MONOTONIC, 6);
+/* resources, process information, wait status */
 SAME(RUSAGE_SELF, 0);
 SAME(PROC_PIDTBSDINFO, 3);
 SAME(_WSTOPPED, 0x7f);
@@ -105,18 +82,6 @@ SAME(_WSTOPPED, 0x7f);
 /* struct layouts, as the expressions declare them */
 #define AT(type, field, offset) \
     _Static_assert(offsetof(type, field) == (offset), #type "." #field " is at " #offset)
-
-/* { unsigned long ident; short filter; unsigned short flags; unsigned fflags;
- *   long data; void* udata; } */
-_Static_assert(sizeof(struct kevent) == 32, "struct kevent is 32 bytes");
-AT(struct kevent, ident, 0);
-AT(struct kevent, filter, 8);
-AT(struct kevent, flags, 10);
-AT(struct kevent, fflags, 12);
-AT(struct kevent, data, 16);
-AT(struct kevent, udata, 24);
-_Static_assert(sizeof(((struct kevent *)0)->filter) == 2 && sizeof(((struct kevent *)0)->fflags) == 4,
-               "kevent's filter is 16 bits, fflags 32");
 
 /* { void (*h)(int); unsigned m; int f; } */
 _Static_assert(sizeof(struct sigaction) == 16, "struct sigaction is 16 bytes");
@@ -130,14 +95,11 @@ _Static_assert(sizeof(struct winsize) == 8, "struct winsize is 8 bytes");
 AT(struct winsize, ws_row, 0);
 AT(struct winsize, ws_col, 2);
 
-/* { long s; int us; } and { long s; long ns; } */
+/* { long s; int us; } */
 _Static_assert(sizeof(struct timeval) == 16 && sizeof(((struct timeval *)0)->tv_usec) == 4,
                "struct timeval is a long and an int");
 AT(struct timeval, tv_sec, 0);
 AT(struct timeval, tv_usec, 8);
-_Static_assert(sizeof(struct timespec) == 16, "struct timespec is two longs");
-AT(struct timespec, tv_sec, 0);
-AT(struct timespec, tv_nsec, 8);
 
 /* `fstat64` and `stat64` into 18 or 32 unsigned long longs: st_dev (32 bits) at
  * 0, st_ino at 8, st_size at 96. Their `struct stat64` is the SDK's `struct

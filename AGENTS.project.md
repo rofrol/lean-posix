@@ -73,7 +73,9 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   `kqWaitFor`); the exits of processes that need not be children
   (`watchExits`, `ExitWatch`, `ExitWatch.forget`, `ExitWatch.wait`,
   `awaitExits`); catchable signals as events, each caught by a no-op handler
-  that exec resets (`catchSignals`, `nextSignal`).
+  that exec resets (`catchSignals`, `nextSignal`). Its C is `c/kqueue.c`,
+  with `struct kevent`, `struct sigaction` and the constants from the SDK's
+  headers; `ExitWatch`'s bookkeeping is Lean.
 - `Term.lean`: `termCtl` (one entry point by numeric `op`: enter, leave,
   install signal handlers, hand the terminal across exec through
   `LEAN_POSIX_TERMIOS`, or a signal number arriving) and `termEnter`. Its C is
