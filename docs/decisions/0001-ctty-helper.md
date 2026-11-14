@@ -1,8 +1,8 @@
 # How the ctty helper of `trySpawn` is built, shipped and found
 
-Status: proposed, awaiting the owner's choice between options A and D below
-(item quboep, 2026-11-14). The models disagreed on this choice, so it is the
-owner's to make. Item 53zc6j implements whichever one is chosen.
+Status: decided by the owner on 2026-11-14: option A (item quboep). The
+models disagreed (sol A, argon D); the owner chose A on the coordinating
+session's recommendation. Item 53zc6j implements it.
 
 ## Context
 
@@ -63,9 +63,23 @@ about 108 MB.
 
 ## Decision
 
-Pending: the owner chooses between A and D. Option B is rejected on the
-evidence above. Option C was considered by both models and recommended by
-neither.
+Option A: a separate small C helper executable, built by lean-posix as a
+Lake target with the same toolchain clang and SDK setup as `leanposixc`,
+speaking a versioned protocol and refusing any other version. A consumer
+that spawns with `ctty` builds it and installs it next to its own
+executables; the library finds it next to `IO.appPath` by default, so
+`trySpawn`'s signature need not change (53zc6j settles the exact lookup and
+its error). Option B is rejected on the evidence above; option C was
+recommended by neither model.
+
+Why A over D (the owner, 2026-11-14, on the coordinating session's
+reasoning): only rr uses `ctty` today, so A's build and install work falls on
+one consumer, not on all four; D's failure after an in-place rebuild hits
+exactly rr, which runs from its checkout's `.lake/build/bin` and is rebuilt in
+place; and D puts a constructor into every consumer executable and adds
+suspended-process inspection, orphan and SIGHUP handling and an unmeasured
+spawn-to-exec time, where A's helper is setsid, TIOCSCTTY and execve. A
+missing helper is found at the first `ctty` spawn, with a clear failure.
 
 ## Alternatives
 
