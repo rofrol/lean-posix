@@ -1,6 +1,5 @@
 ## Next, in order
 
-mtobhv lean-posix: move Spawn's pipe, waitpid, waitStatus and writeAll into the C file; spawnRaw waits for 53zc6j
 quboep lean-posix: design how 53zc6j's ctty helper executable is built, shipped and found by consumers
 53zc6j lean-posix: start children with posix_spawn instead of fork, and a ctty through a small helper
 qgxw6v lean-posix: three bindings rr2 needs, in one pin: a session kill, a one-descriptor append, and a spawn that hands chosen descriptors to the child only
