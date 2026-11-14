@@ -62,15 +62,22 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   `defaultSignals`, `defaultPipe`, `processStart` (`proc_pidinfo` start time),
   `peakRss`. Its C is `c/process.c`, with `struct proc_bsdinfo`,
   `struct rusage` and the constants from the SDK's headers.
-- `Spawn.lean` (imports `Fd`): `trySpawn`/`spawn` (fork, a close-on-exec
-  result pipe, `execve` along `candidates`, the PATH lookup; optionally
-  `setsid` and a controlling terminal; `SpawnFailure`, `inherit`, `devNull`),
-  `pipe`, `waitpid`, `waitOutcome` (`ExitOutcome`: an exit code or a signal,
-  decoded by `ExitOutcome.ofStatus` with theorems), `writeAll`. `spawnRaw` is public but internal to
-  `trySpawn`. One process-wide lock (`spawnLock`) serializes `pipe` and spawn.
-  The C of `pipe`, `waitpid`, `waitOutcome` and `writeAll` is `c/spawn.c`,
-  with the constants and wait-status macros from the SDK's headers;
-  `spawnRaw` is still an inline expression.
+- `Spawn.lean` (imports `Fd`): `trySpawn`/`spawn` (`posix_spawn` along
+  `candidates`, the PATH lookup; optionally `POSIX_SPAWN_SETSID`; with `ctty`,
+  through the helper below; `SpawnFailure`, `inherit`, `devNull`,
+  `cttyHelperName`), `pipe`, `waitpid`, `waitOutcome` (`ExitOutcome`: an exit
+  code or a signal, decoded by `ExitOutcome.ofStatus` with theorems),
+  `writeAll`. `spawnRaw` is public but internal to `trySpawn`. One
+  process-wide lock (`spawnLock`) serializes `pipe` and spawn. Its C is
+  `c/spawn.c`, with the constants and wait-status macros from the SDK's
+  headers.
+- `helper/ctty.c`: the executable `lean-posix-ctty`, the Lake target of that
+  name, through which a `ctty` spawn starts its program: `setsid`,
+  `ioctl(TIOCSCTTY)`, the `execve`s, and a failure reported on a
+  close-on-exec result pipe, in a versioned protocol stated in its header and
+  spoken by `c/spawn.c` (`docs/decisions/0001-ctty-helper.md`). Not linked
+  into anything; Lake writes it to the root package's `.lake/build/bin`, and
+  `trySpawn` looks for it next to `IO.appPath`.
 - `Lock.lean`: `lockFile`/`unlock`, `lockHanded` (a lock handed across
   exec; `lockHeld`, `lockElsewhere`), `lockDir`, `link`. `lockRaw` is public
   but internal to `lockFile`. Its C is `c/lock.c`, with `struct stat` and
@@ -111,11 +118,19 @@ module imports another; nothing here imports a consumer. The tests import
   installs handlers for every catchable terminating signal, ignores SIGTSTP,
   changes stdin's termios and writes escape sequences to stdout;
   `defaultSignals`/`defaultPipe` change signal dispositions; `trySpawn`
-  forks, and its child calls only async-signal-safe functions before exec.
+  starts processes with `posix_spawn`, never `fork`, and a `ctty` spawn runs
+  the executable `lean-posix-ctty` it finds next to `IO.appPath` with the
+  child's descriptors and environment: whoever can write that directory
+  decides what runs there, as they decide the program itself.
 - Arguments are passed to `execve`/`execvp` as an array, never through a
   shell; validating them against the consumer's rules is the consumer's job.
 - The library owns no persistent data. Files it opens, locks or links are
   the caller's paths.
+- Deployment: the library is linked into consumers through `leanposixc`; the
+  one separate piece is the `lean-posix-ctty` helper, which a consumer that
+  spawns with `ctty` builds (`lake build lean-posix/lean-posix-ctty` writes it
+  to the consumer's own `.lake/build/bin`) and installs next to its
+  executables. Without it such a spawn fails at `ctty helper`.
 
 ## Consumers
 
@@ -133,7 +148,8 @@ Other users, if any, are not known here.
 - `lake build`: the library and `leanposixc`, the C of `c/` (which fails on a
   wrong number in `c/abi.c`); the macOS SDK (Xcode or the Command Line Tools,
   `xcrun --show-sdk-path`) is a build requirement, of every consumer too.
-- `lake test`: the `tests` executable (`Tests/Main.lean`), each binding
+- `lake test`: the `tests` executable (`Tests/Main.lean`, which needs the
+  `lean-posix-ctty` target, built next to it), each binding
   against the real system in a temporary directory, the terminal tests in
   children it starts on a pty (`tests term`, `tests term-signal`); the exit
   status is the number of failures. Some tests run system programs (for
@@ -142,7 +158,9 @@ Other users, if any, are not known here.
   (`Diag/SpawnStress.lean`): a diagnostic stress run of `trySpawn` in fresh
   processes whose other threads call into libSystem, counting each child's
   outcome; not a test, and not run by `lake test`. Its exit status is 1 when
-  any spawn did not reach its exec and exit 0.
+  any spawn did not reach its exec and exit 0. Measured on macOS 27.2 arm64
+  with `200 20 2`: 30 of 4000 children killed by SIGKILL with the forking
+  `trySpawn`, none with `posix_spawn` (item 53zc6j).
 
 ## Types for lifecycles and invariants (Lean)
 

@@ -68,8 +68,13 @@ Lake target with the same toolchain clang and SDK setup as `leanposixc`,
 speaking a versioned protocol and refusing any other version. A consumer
 that spawns with `ctty` builds it and installs it next to its own
 executables; the library finds it next to `IO.appPath` by default, so
-`trySpawn`'s signature need not change (53zc6j settles the exact lookup and
-its error). Option B is rejected on the evidence above; option C was
+`trySpawn`'s signature need not change. Settled in 53zc6j: the executable is
+`lean-posix-ctty` (`Posix.cttyHelperName`), looked for in the directory of
+`IO.appPath` only, with no override; the Lake target of the same name writes it
+to the root package's `.lake/build/bin`; a missing helper fails at the stage
+`ctty helper` with the errno of its `posix_spawn` (ENOENT), and a helper that
+does not greet with protocol version 1 fails there with EPROTONOSUPPORT. The
+protocol is in `helper/ctty.c`'s header. Option B is rejected on the evidence above; option C was
 recommended by neither model.
 
 Why A over D (the owner, 2026-11-14, on the coordinating session's

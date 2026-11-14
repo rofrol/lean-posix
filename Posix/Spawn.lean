@@ -9,36 +9,41 @@ Lean's `IO.Process.spawn` forks, and a child whose `execvp` fails prints "could
 not execute external process" and exits 255 (Lean nightly-2026-10-25's
 `src/runtime/process.cpp`), so its caller cannot tell a program that did not run
 (no file, no execute bit, a script whose interpreter is missing) from one that ran
-and died at once. `spawn` reports the exec's own result through a pipe whose write
-end closes on exec: the child writes what failed and its errno there, so the
-parent reads either that record or the end of the pipe, which the exec closed.
+and died at once. `spawn` starts the program with `posix_spawn`, which on macOS
+returns the exec's own errno: when the exec fails, no child is left.
 
-Between `fork` and exec the child calls only async-signal-safe functions
-(`fcntl`, `setsid`, `ioctl`, `open`, `dup2`, `close`, `execve`, `write`, `_exit`): another thread
-may hold a lock of libc or of Lean's allocator at the fork. So the parent builds
-everything first: the program's paths from PATH, as `execvp` would try them
-(an empty entry is the current directory; with no PATH, `/usr/bin:/bin`), and
-its environment, and the child tries each with `execve`. Unlike `execvp`, a file
-the kernel will not execute (ENOEXEC, a script with no `#!`) is not run through
-`/bin/sh`: it is a failed exec.
+No `fork`: every Lean program has threads, and on macOS `fork` runs libSystem's
+atfork handlers in the child before its own code; with other threads inside
+libnotify's first calls, children were killed by SIGKILL inside `fork` itself
+(item tuvst2, `lake exe spawnstress`). The parent builds everything first: the
+program's paths from PATH, as `execvp` would try them (an empty entry is the
+current directory; with no PATH, `/usr/bin:/bin`), and its environment, and
+tries each path with `posix_spawn`. Unlike `execvp`, a file the kernel will not
+execute (ENOEXEC, a script with no `#!`) is not run through `/bin/sh`: it is a
+failed exec.
 
-macOS has no `pipe2`, so a pipe is made close-on-exec in a second call, and a
-fork in another thread in between gives its child the pipe's ends. Every `pipe`
-and `spawn` here holds one lock, so they cannot leak into each other; a fork by
-something else (Lean's own spawn) in that window gives its child a copy of the
-write end, which delays the end of the pipe until that child exits or execs, as
-it would with Lean's spawn.
+macOS's `posix_spawn` has `POSIX_SPAWN_SETSID` but no attribute for a
+controlling terminal, so a spawn with `ctty` starts the helper `lean-posix-ctty`
+(`helper/ctty.c`, the Lake target of that name, with the protocol in its
+header), which does `setsid`, `ioctl(TIOCSCTTY)` and the `execve`s, and reports
+a failure through a pipe whose write end closes on exec
+(`docs/decisions/0001-ctty-helper.md`). The helper is looked for next to
+`IO.appPath`: a program that spawns with `ctty` installs it there.
+
+macOS has no `pipe2`, so a pipe (`pipe`, and the result pipe of a `ctty`
+spawn) is made close-on-exec in a second call, and a spawn in another thread in
+between gives its child the pipe's ends, without close-on-exec, until it exits.
+Every `pipe` and `spawn` here holds one lock, so they cannot leak into each
+other; a spawn by something else (Lean's own spawn) in that window gives its
+child such a copy, which delays the end of the pipe until that child exits.
 
 Signals are left as the parent has them, as Lean's spawn leaves them: Lean
 ignores SIGPIPE, and so does the child (`defaultSignals` restores it before an
 `exec`). Descriptors the parent has open without close-on-exec stay open in the
 child, as with Lean's spawn.
 
-`pipe`, `waitpid`, `waitOutcome` and `writeAll` are C in `c/spawn.c`, which takes
-every constant and the wait-status macros from the SDK's headers. `spawnRaw` is
-still one inline expression, whose numbers are macOS's: F_GETFD 1, F_SETFD 2,
-FD_CLOEXEC 1, F_DUPFD_CLOEXEC 67, O_RDWR 2, O_CLOEXEC 0x1000000, EINTR 4, ENOENT 2,
-ENOTDIR 20, EACCES 13, EIO 5, TIOCSCTTY 0x20007461, SIGKILL 9.
+All of it is C in `c/spawn.c`, which takes every constant and the wait-status
+macros from the SDK's headers.
 -/
 
 namespace Posix
@@ -51,20 +56,40 @@ def devNull : UInt32 := 0xFFFFFFFE
 
 initialize spawnLock : Std.Mutex Unit ← Std.Mutex.new ()
 
-/-- The fork and exec of `spawn`. `paths` are the program's paths to try in order,
+@[extern "lean_posix_spawn"]
+private opaque spawnC (paths argv env : @& Array String) (stdin stdout stderr : UInt32) (setsid ctty : Bool)
+  (helper : @& String) : IO UInt64
+
+/-- The name of the ctty helper's executable, which `trySpawn` looks for in the
+directory of `IO.appPath`. -/
+def cttyHelperName : String := "lean-posix-ctty"
+
+/-- The helper's path next to `IO.appPath`, or "", which no spawn finds, when
+`IO.appPath` fails. -/
+private def cttyHelperPath : IO String := do
+  match ← IO.appPath.toBaseIO with
+  | .ok app => return ((app.parent.getD ".") / cttyHelperName).toString
+  | .error _ => return ""
+
+/-- The `posix_spawn` of `spawn`. `paths` are the program's paths to try in order,
 `argv` its arguments with its name first, `env` the `NAME=value` entries, of
 distinct names, that come before the parent's environment and replace its entries
 of the same names; an entry without `=` is a name whose entry the child does not
 get. Each of
 `stdin`, `stdout` and `stderr` is a descriptor above 2, made the child's 0, 1 or 2,
 or `inherit` or `devNull`. The pid; or, with the high bit set, what failed in bits
-32 to 39 (0 the exec, 1 opening `/dev/null`, 2 `dup2`, 3 `setsid`, 4 `pipe`, 5
-`fork`, 6 a result pipe that failed or gave a record cut short, the child then
-killed, 7 `ioctl(TIOCSCTTY)`) and its errno in the low 32 bits. A source descriptor that is not open is
-refused at `dup2` before anything is made, so no descriptor made here can take its
-number. A child whose setup or exec failed is reaped before this returns. -/
-@[extern c inline "({ extern int pipe(int*); extern int fcntl(int, int, ...); extern int fork(void); extern int execve(const char*, char* const*, char* const*); extern int dup2(int, int); extern int setsid(void); extern int open(const char*, int, ...); extern long write(int, const void*, unsigned long); extern long read(int, void*, unsigned long); extern int close(int); extern void _exit(int); extern int waitpid(int, int*, int); extern int* __error(void); extern char** environ; extern int strncmp(const char*, const char*, unsigned long); extern char* strchr(const char*, int); extern unsigned long strlen(const char*); extern int ioctl(int, unsigned long, ...); size_t nc = lean_array_size(#1), na = lean_array_size(#2), ne = lean_array_size(#3), nv = 0; while (environ[nv]) nv++; char** c = malloc((nc + 1) * sizeof(char*)); for (size_t i = 0; i < nc; i++) c[i] = (char*)lean_string_cstr(lean_array_get_core(#1, i)); char** v = malloc((na + 1) * sizeof(char*)); for (size_t i = 0; i < na; i++) v[i] = (char*)lean_string_cstr(lean_array_get_core(#2, i)); v[na] = 0; char** e = malloc((ne + nv + 1) * sizeof(char*)); size_t k = 0; for (size_t i = 0; i < ne; i++) { const char* x = lean_string_cstr(lean_array_get_core(#3, i)); if (strchr(x, '=')) e[k++] = (char*)x; } for (size_t j = 0; j < nv; j++) { int keep = 1; for (size_t i = 0; i < ne; i++) { const char* x = lean_string_cstr(lean_array_get_core(#3, i)); const char* q = strchr(x, '='); unsigned long n = q ? (unsigned long)(q - x) : strlen(x); if (strncmp(environ[j], x, n) == 0 && environ[j][n] == '=') { keep = 0; break; } } if (keep) e[k++] = environ[j]; } e[k] = 0; int fds[3] = {(int)#4, (int)#5, (int)#6}; uint64_t res = 0; for (int i = 0; i < 3; i++) if (fds[i] >= 0 && fcntl(fds[i], 1) < 0) { res = (1ULL << 63) | (2ULL << 32) | (unsigned)*__error(); break; } int p[2]; if (res) {} else if (pipe(p) != 0) res = (1ULL << 63) | (4ULL << 32) | (unsigned)*__error(); else { fcntl(p[0], 2, 1); fcntl(p[1], 2, 1); if (p[1] < 3) { int d = fcntl(p[1], 67, 3); int x = *__error(); close(p[1]); p[1] = d; if (d < 0) { close(p[0]); res = (1ULL << 63) | (4ULL << 32) | (unsigned)x; } } } if (res) {} else { int pid = fork(); if (pid == 0) { int st = 0, er = 0, w = p[1], r; if (#7 && setsid() < 0) { st = 3; er = *__error(); } for (int i = 0; st == 0 && i < 3; i++) { int fd = fds[i]; if (fd == -1) continue; int opened = 0; if (fd == -2) { fd = open(\"/dev/null\", 2 | 0x1000000); if (fd < 0) { st = 1; er = *__error(); break; } opened = fd != i; } if (fd == i) r = fcntl(i, 2, 0); else do r = dup2(fd, i); while (r < 0 && *__error() == 4); if (r < 0) { st = 2; er = *__error(); } if (opened) close(fd); } if (st == 0 && #8 && ioctl(0, 0x20007461UL, 0) < 0) { st = 7; er = *__error(); } if (st == 0) { int seen = 0, stop = 0; for (size_t i = 0; i < nc && !stop; i++) { execve(c[i], v, e); int x = *__error(); if (x == 13) seen = 1; else if (x != 2 && x != 20) { er = x; stop = 1; } } if (!stop) er = seen ? 13 : 2; } int rec[2] = {st, er}; long put = 0; while (put < 8) { long n = write(w, (char*)rec + put, 8 - put); if (n > 0) put += n; else if (n < 0 && *__error() == 4) continue; else break; } _exit(127); } int forkErr = *__error(); close(p[1]); if (pid < 0) { res = (1ULL << 63) | (5ULL << 32) | (unsigned)forkErr; close(p[0]); } else { int rec[2]; long got = 0; int rerr = 0; while (got < 8) { long r = read(p[0], (char*)rec + got, 8 - got); if (r > 0) got += r; else if (r < 0 && *__error() == 4) continue; else { if (r < 0) rerr = *__error(); break; } } close(p[0]); if (got == 0 && !rerr) res = (uint64_t)(unsigned)pid; else { extern int kill(int, int); int s; if (got != 8) kill(pid, 9); while (waitpid(pid, &s, 0) < 0 && *__error() == 4) {} res = got == 8 ? (1ULL << 63) | ((uint64_t)(rec[0] & 0xff) << 32) | (unsigned)rec[1] : (1ULL << 63) | (6ULL << 32) | (unsigned)(rerr ? rerr : 5); } } } free(c); free(v); free(e); lean_io_result_mk_ok(lean_box_uint64(res)); })"]
-opaque spawnRaw (paths argv env : @& Array String) (stdin stdout stderr : UInt32) (setsid ctty : Bool) : IO UInt64
+32 to 39 (0 the exec, 1 opening `/dev/null`, 2 `dup2`, 3 `setsid`, 4 `pipe`, 6 a
+result pipe that failed or gave a record cut short, the child then killed, 7
+`ioctl(TIOCSCTTY)`, 8 the ctty helper) and its errno in the low 32 bits; 3 only
+with `ctty`, since a spawn without it makes the session with
+`POSIX_SPAWN_SETSID`, whose failure comes back as the exec's. A source
+descriptor that is not open is refused at `dup2` before anything is made, so no
+descriptor made here can take its number. A child whose setup or exec failed is
+reaped before this returns. With `ctty`, the child is started through the helper
+`cttyHelperName` next to `IO.appPath`. -/
+def spawnRaw (paths argv env : @& Array String) (stdin stdout stderr : UInt32) (setsid ctty : Bool) :
+    IO UInt64 := do
+  spawnC paths argv env stdin stdout stderr setsid ctty (← if ctty then cttyHelperPath else pure "")
 
 /-- The paths `execvp` would try for `name`, from `path`, the value of PATH. -/
 def candidates (name : String) (path : Option String) : Array String :=
@@ -75,9 +100,15 @@ def candidates (name : String) (path : Option String) : Array String :=
 
 /-- Why `spawn` started no program: what failed, and its errno. -/
 structure SpawnFailure where
-  /-- `exec` when the program could not be executed; otherwise the step of the
-  setup before it that failed: `open /dev/null`, `dup2`, `setsid`, `TIOCSCTTY`,
-  `pipe`, `fork`, or `the result pipe` for a record cut short. -/
+  /-- `exec` when the program could not be executed, or `posix_spawn` failed
+  for it (macOS returns both as one errno); otherwise the step of the setup
+  before it that failed: `open /dev/null`, `dup2`, `setsid`, `TIOCSCTTY`,
+  `pipe`, `the result pipe` for a record cut short, or `ctty helper` when the
+  helper of a `ctty` spawn could not be started (the errno of its
+  `posix_spawn`, ENOENT when it is missing) or did not greet in this library's
+  protocol version (EPROTONOSUPPORT: a helper of another version, or one that
+  died first). `setsid` is said only with `ctty`: without it the session is made
+  by `posix_spawn`, whose failure is said as `exec`. -/
   stage : String
   errno : UInt32
   deriving Repr, BEq
@@ -88,8 +119,8 @@ def SpawnFailure.ofStage : UInt32 → String
   | 2 => "dup2"
   | 3 => "setsid"
   | 4 => "pipe"
-  | 5 => "fork"
   | 7 => "TIOCSCTTY"
+  | 8 => "ctty helper"
   | _ => "the result pipe"
 
 /-- Starts `argv` (its first word the program, looked up on PATH as `execvp` does
@@ -100,7 +131,8 @@ descriptor above 2 that becomes the child's own, `inherit` or `devNull`; in a
 session of its own, leading its process group, with `setsid`; with `ctty` too, its
 stdin, which must then be a terminal no session controls, becomes its controlling
 terminal (`TIOCSCTTY`), so it gets SIGWINCH when the terminal's size is set, as
-`login_tty` does. The child's pid once
+`login_tty` does; such a spawn goes through the helper `cttyHelperName`, found
+next to `IO.appPath`, and fails at `ctty helper` without it. The child's pid once
 the program runs: the exec has succeeded by then. Or why no program runs, the child
 being reaped already. The caller's descriptors stay open and its own: close the
 child's ends after the spawn, whatever its result. The pid is the caller's to reap

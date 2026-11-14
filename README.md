@@ -4,10 +4,7 @@ POSIX calls Lean 4's library lacks, as Lean bindings, for macOS. The bindings of
 `Posix.Fd`, `Posix.Pty`, `Posix.Lock`, `Posix.Process`, `Posix.Spawn`,
 `Posix.Kqueue` and `Posix.Term` are C in `c/fd.c`, `c/pty.c`, `c/lock.c`,
 `c/process.c`, `c/spawn.c`, `c/kqueue.c` and `c/term.c`, which Lake compiles
-against the macOS SDK's headers; only `Posix.Spawn`'s `spawnRaw` is still one
-`@[extern c inline "..."]` expression that declares the C functions it calls,
-and `c/abi.c` checks the numbers it writes by hand against the SDK's
-headers. Every binding's contract is in its doc
+against the macOS SDK's headers. Every binding's contract is in its doc
 comment.
 
 Written for rr's watcher, supervisor and terminal UI, and kept apart so that
@@ -20,7 +17,7 @@ their shells hold no C of their own.
 | `Posix.Fd`      | `dup`, `dup2`, `close`, `read`, `pread`, a pipe drained without waiting, the descriptor under a `Handle`, `isatty`, `strerror`, a file's times (`utimes`), a file's device, inode, size and bytes from an offset, on one descriptor (`fstat`, `pread`) |
 | `Posix.Pty`     | a raw pty (`openpty`), `login_tty`, the window size, read and set  |
 | `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, `alarm`, default signals before exec, a process's start time (`proc_pidinfo`), peak RSS |
-| `Posix.Spawn`   | a spawn that says whether its exec failed (fork, a close-on-exec pipe for the exec's result, `execve` along PATH), in a session of its own on a controlling terminal if asked, `pipe`, `waitpid`, `waitOutcome` (an exit code kept apart from a signal), a write of every byte |
+| `Posix.Spawn`   | a spawn that says whether its exec failed (`posix_spawn` along PATH, no `fork`), in a session of its own, on a controlling terminal if asked (through the helper `lean-posix-ctty`), `pipe`, `waitpid`, `waitOutcome` (an exit code kept apart from a signal), a write of every byte |
 | `Posix.Lock`    | exclusive `flock` on a file or a directory, such a lock handed to the next program this process executes (`fstat`, `stat`), `link` that fails on a taken name |
 | `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; the exits of processes that need not be children; stdin, SIGWINCH, files and exits of processes for a full-screen program, waited for with or without a timeout |
 | `Posix.Term`    | a full-screen terminal in raw mode, with click or any-motion mouse reports or none, restored (mouse reports off, the pointer shape reset) on every exit and signal that can be caught, and handed to a new build across `exec` |
@@ -56,6 +53,15 @@ require «lean-posix» from git "https://github.com/rofrol/lean-posix" @ "<commi
 
 and `import Posix`. Pin a commit; each pinned commit carries a tag `pin/<sha12>`
 so it stays fetchable.
+
+A program that spawns with `ctty := true` needs the helper `lean-posix-ctty`
+next to its own executable, where `trySpawn` looks for it (beside
+`IO.appPath`): `lake build lean-posix/lean-posix-ctty` builds it into the
+package's `.lake/build/bin`, or name it in an executable's `needs`
+(`` needs := #[`@«lean-posix»/«lean-posix-ctty»] ``). Install it beside the
+executable wherever that is installed. Without it, such a spawn fails with the
+stage `ctty helper` and ENOENT; a helper of another lean-posix version, with
+EPROTONOSUPPORT.
 
 ## Tests
 

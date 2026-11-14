@@ -2,15 +2,18 @@ import Posix
 import Std.Data.HashMap
 
 /-!
-# spawnstress: does `trySpawn`'s fork fail while other threads are inside libSystem?
+# spawnstress: does `trySpawn` fail while other threads are inside libSystem?
 
 A diagnostic stress run, not a test (AGENTS.md Rule 10 allows a labelled stress
 loop as a diagnostic, never as a regression test); `lake test` does not run it.
 
 On macOS `fork` runs libSystem's atfork handlers before the child's own code,
 and in an Odin program a fork while another thread was inside libnotify's
-`os_once` killed the child before its exec. This program asks whether
-`Posix.trySpawn` meets that in a multithreaded Lean process.
+`os_once` killed the child before its exec. This program asked whether
+`Posix.trySpawn`, when it forked, met that in a multithreaded Lean process: it
+did (item tuvst2), and `trySpawn` moved to `posix_spawn` (item 53zc6j). With
+`200 20 2` on macOS 27.2 arm64, 30 of 4000 children were killed by SIGKILL
+before that change, none after it.
 
 `lake exe spawnstress ROUNDS SPAWNS THREADS [KIND,...]` runs ROUNDS fresh worker processes
 (this program with `worker`), one after another. A fresh process because an
@@ -22,11 +25,10 @@ a pipe. The `ack` it reads back says the child reached its exec and ran; the
 child is then reaped with `waitOutcome`. Every spawn's outcome is counted:
 
 - `exec reached, exited 0`: the `ack` came back and echo exited 0.
-- `no ack, signal N` (or `no ack, exit N`): `trySpawn` returned a pid (its
-  result pipe ended with no failure record, as it does after an exec, and as it
-  does when the child dies first) but no `ack` came back. The count alone does
-  not say whether the child died before its exec or after it, before echo
-  wrote; its crash report (`~/Library/Logs/DiagnosticReports`) says where.
+- `no ack, signal N` (or `no ack, exit N`): `trySpawn` returned a pid but no
+  `ack` came back. The count alone does not say whether the child died before
+  echo wrote or where; its crash report (`~/Library/Logs/DiagnosticReports`)
+  says where.
 - `setup failure: STAGE errno N`: `trySpawn` reported a failed stage.
 
 THREADS 0 is the control: the same spawns with no other thread calling in.

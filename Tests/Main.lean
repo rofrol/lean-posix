@@ -157,6 +157,41 @@ def pty (t : T) : IO Unit := do
   close s
   close m
 
+/-- A copy of this program in `dir`, run as `tests ctty-spawn`: what its `ctty`
+spawn said. -/
+def cttySpawnFrom (dir : System.FilePath) : IO String := do
+  IO.FS.createDirAll dir
+  let copy := dir / "tests"
+  discard <| IO.Process.output { cmd := "/bin/cp", args := #[(← IO.appPath).toString, copy.toString] }
+  return (← IO.Process.output { cmd := copy.toString, args := #["ctty-spawn"] }).stdout
+
+/-- A `ctty` spawn goes through the helper `lean-posix-ctty` next to
+`IO.appPath`, which Lake builds next to these tests: an exec that fails there
+comes back with its errno, as without `ctty`. The helper refuses a call of
+another protocol version. A copy of this program in a directory without the
+helper, or with one that speaks no protocol, fails its `ctty` spawn at
+`ctty helper`. -/
+def cttyHelper (t : T) (dir : System.FilePath) : IO Unit := do
+  let (m, s) ← openPty
+  let r ← trySpawn #[(dir / "missing").toString] #[] s s s (setsid := true) (ctty := true)
+  let failed := match r with | .error f => f == { stage := "exec", errno := 2 } | .ok _ => false
+  t.check "a ctty spawn whose exec fails says so, with its errno" failed s!"{repr r}"
+  close s; close m
+  let helper := ((← IO.appPath).parent.getD ".") / cttyHelperName
+  let out ← IO.Process.output { cmd := helper.toString, args := #["--lean-posix-ctty-v2", "3", "0", "0"] }
+  t.check "the helper refuses another protocol version, with exit status 127"
+    (out.exitCode == 127 && contains out.stderr "protocol --lean-posix-ctty-v1") s!"{out.exitCode} {out.stderr.quote}"
+  let alone ← cttySpawnFrom (dir / "alone")
+  t.check "without the helper next to the program, a ctty spawn fails at ctty helper with ENOENT"
+    (alone == "ctty helper 2\n") alone.quote
+  let foreign := dir / "foreign"
+  IO.FS.createDirAll foreign
+  IO.FS.writeFile (foreign / cttyHelperName) "#!/bin/sh\nexit 0\n"
+  discard <| IO.Process.output { cmd := "chmod", args := #["+x", (foreign / cttyHelperName).toString] }
+  let said ← cttySpawnFrom foreign
+  t.check "with a helper that does not greet, it fails at ctty helper with EPROTONOSUPPORT"
+    (said == "ctty helper 43\n") said.quote
+
 /-- The descriptors below `limit` open in a child, `tests open-fds LIMIT` with a
 pipe as its stdout, which it reports as 1. -/
 def childFds (limit : Nat) : IO (List Nat) := do
@@ -843,6 +878,13 @@ def main (args : List String) : IO UInt32 := do
       let (m, _) ← kqWait kq false
       if m &&& 2 != 0 then say; return 0
     return 4
+  | ["ctty-spawn"] =>
+    let (m, s) ← openPty
+    match ← trySpawn #["true"] #[] s s s (setsid := true) (ctty := true) with
+    | .ok pid => discard <| waitpid pid; IO.println "ran"
+    | .error f => IO.println s!"{f.stage} {f.errno}"
+    close s; close m
+    return 0
   | ["open-fds", limit] =>
     -- An ioctl on each number, which opens nothing: EBADF (9) when it is closed.
     let open_ ← (List.range (limit.toNat?.getD 0)).filterM fun fd => do
@@ -912,6 +954,7 @@ def main (args : List String) : IO UInt32 := do
     fds t dir
     fileAt t dir
     pty t
+    cttyHelper t dir
     inherited t dir
     locks t dir
     kq t dir
