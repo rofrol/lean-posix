@@ -26,6 +26,12 @@ def text (b : ByteArray) : String := (String.fromUTF8? b).getD s!"{b.toList}"
 
 def contains (hay needle : String) : Bool := (hay.splitOn needle).length > 1
 
+instance [BEq ε] [BEq α] : BEq (Except ε α) where
+  beq
+    | .ok a, .ok b => a == b
+    | .error a, .error b => a == b
+    | _, _ => false
+
 /-- Up to `n` events of the kqueue of `watchSession`, until `stop` is one. -/
 def eventsUntil (kq : UInt32) (stop : UInt32) : Nat → IO (List UInt32)
   | 0 => return []
@@ -100,6 +106,39 @@ def fileAt (t : T) (dir : System.FilePath) : IO Unit := do
   let isDir ← readFileAt dir 0 3
   t.check "readFileAt of a directory is EISDIR"
     (match isDir with | .error e => e == 21 | .ok _ => false)
+
+/-- `appendLine`: a new file, a file whose last line is whole, one whose last line
+is cut, one replaced by rename, a megabyte at once, and what it refuses. -/
+def appends (t : T) (dir : System.FilePath) : IO Unit := do
+  let log := dir / "append.log"
+  let r ← appendLine log (bytes "")
+  t.check "appendLine of nothing opens nothing" (r == .ok false && !(← log.pathExists)) s!"{repr r}"
+  let r ← appendLine log (bytes "a\n")
+  t.check "appendLine makes a missing file" (r == .ok false && (← IO.FS.readFile log) == "a\n") s!"{repr r}"
+  let r ← appendLine log (bytes "b\n")
+  t.check "after a whole line it adds no newline" (r == .ok false && (← IO.FS.readFile log) == "a\nb\n") s!"{repr r}"
+  IO.FS.withFile log .append (·.putStr "cu")
+  let r ← appendLine log (bytes "c\n")
+  t.check "after a cut line it ends that line first"
+    (r == .ok true && (← IO.FS.readFile log) == "a\nb\ncu\nc\n") s!"{repr r} {(← IO.FS.readFile log).quote}"
+  let other := dir / "append.new"
+  IO.FS.writeFile other "x"
+  IO.FS.rename other log
+  let r ← appendLine log (bytes "d\n")
+  t.check "a file replaced by rename gets the line, after its own cut one"
+    (r == .ok true && (← IO.FS.readFile log) == "x\nd\n") s!"{repr r}"
+  let big := String.ofList (List.replicate 1000000 'y') ++ "\n"
+  let r ← appendLine log big.toUTF8
+  let got ← IO.FS.readFile log
+  t.check "a megabyte goes in whole" (r == .ok false && got.length == 4 + big.length && got.endsWith big) s!"{repr r} {got.length}"
+  let r ← appendLine dir (bytes "e\n")
+  t.check "a directory is EISDIR" (r == .error 21) s!"{repr r}"
+  let fifo := dir / "append.fifo"
+  discard <| IO.Process.output { cmd := "/usr/bin/mkfifo", args := #[fifo.toString] }
+  let r ← appendLine fifo (bytes "e\n")
+  t.check "a fifo is EFTYPE, not a file to append to" (r == .error 79) s!"{repr r}"
+  let r ← appendLine (dir / "none" / "log") (bytes "e\n")
+  t.check "no directory is ENOENT" (r == .error 2) s!"{repr r}"
 
 /-- What `fd` gives until it holds `n` lines or ends, in at most 100 reads. -/
 def linesOf (fd : UInt32) (n : Nat) : IO String := do
@@ -597,12 +636,6 @@ def processes (t : T) : IO Unit := do
   alarm 0
   t.check "peakRss is positive" ((← peakRss) > 0)
 
-instance [BEq ε] [BEq α] : BEq (Except ε α) where
-  beq
-    | .ok a, .ok b => a == b
-    | .error a, .error b => a == b
-    | _, _ => false
-
 /-- What `fd` gives until its end, closing it. -/
 partial def readAll (fd : UInt32) (acc : ByteArray := .empty) : IO ByteArray := do
   let b ← read fd 4096
@@ -1037,6 +1070,7 @@ def main (args : List String) : IO UInt32 := do
   try
     fds t dir
     fileAt t dir
+    appends t dir
     pty t
     cttyHelper t dir
     inherited t dir

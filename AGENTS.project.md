@@ -48,7 +48,8 @@ Modules, each under `Posix/`, all in `namespace Posix`:
 
 - `Fd.lean`: descriptors. `dup2`, `dupPrivate`, `close`, `read`, `readAt` (by
   path, opened and closed per call), `readFileAt` (device, inode, size and
-  bytes from one descriptor; `FileAt`, `noSuchFile`), `drainNow` (a pipe's
+  bytes from one descriptor; `FileAt`, `noSuchFile`), `appendLine` (a line
+  appended after a check of the last byte, on one descriptor), `drainNow` (a pipe's
   bytes without waiting), `handleFd` (the descriptor under an
   `IO.FS.Handle`), `isatty`, `strerror`, `setTimes` (`utimes`). Its C is
   `c/fd.c`, with `struct stat`, `struct timeval` and the constants from the

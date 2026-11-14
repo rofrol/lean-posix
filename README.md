@@ -14,7 +14,7 @@ their shells hold no C of their own.
 
 | Module          | What                                                              |
 | --------------- | ----------------------------------------------------------------- |
-| `Posix.Fd`      | `dup`, `dup2`, `close`, `read`, `pread`, a pipe drained without waiting, the descriptor under a `Handle`, `isatty`, `strerror`, a file's times (`utimes`), a file's device, inode, size and bytes from an offset, on one descriptor (`fstat`, `pread`) |
+| `Posix.Fd`      | `dup`, `dup2`, `close`, `read`, `pread`, a pipe drained without waiting, the descriptor under a `Handle`, `isatty`, `strerror`, a file's times (`utimes`), a file's device, inode, size and bytes from an offset, on one descriptor (`fstat`, `pread`), a line appended after a check of the last byte, on one descriptor (`O_APPEND`, `fstat`, `pread`, `write`) |
 | `Posix.Pty`     | a raw pty (`openpty`), `login_tty`, the window size, read and set  |
 | `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, the processes of a session and the end of all of them (`proc_listallpids`, `getsid`, SIGKILL in rounds until none is left), `alarm`, default signals before exec, a process's start time (`proc_pidinfo`), peak RSS |
 | `Posix.Spawn`   | a spawn that says whether its exec failed (`posix_spawn` along PATH, no `fork`), in a session of its own, on a controlling terminal if asked (through the helper `lean-posix-ctty`), `pipe`, `waitpid`, `waitOutcome` (an exit code kept apart from a signal), a write of every byte |

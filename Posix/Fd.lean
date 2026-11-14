@@ -57,6 +57,28 @@ def readFileAt (path : System.FilePath) (offset : UInt64) (n : USize) :
   return (← readFileAtRaw path.toString offset n).map fun (dev, ino, size, bytes) =>
     { dev, ino, size, bytes }
 
+@[extern "lean_posix_append_line"]
+private opaque appendLineRaw (path : @& String) (bytes : @& ByteArray) : IO (Except UInt32 Bool)
+
+/-- Appends `bytes` to the regular file at `path` so that they start a line of
+their own, all on one descriptor: opens it once (read and append, made with mode
+0666 less the umask when missing, no child inherits it), `fstat`s it, `pread`s its
+last byte when it is not empty, and writes a newline first when that byte is not
+one (the file ended in a cut line), then `bytes`, as one buffer, past any EINTR
+and short write; then closes it. The check and the write are of the one file the
+open found, even when the path is renamed over meanwhile; whoever replaces the
+file holds the caller's lock while doing so for the append to reach the new one.
+The caller ends `bytes` with its own newline. `.ok true` when a newline was put
+before `bytes`, `.ok false` when none was, and for empty `bytes`, which open
+nothing. Else the errno of the open, `fstat`, `pread`, write or close: EFTYPE (79) for
+what is not a regular file (EISDIR, 21, for a directory, from the open); EIO when
+the file shrank between the `fstat` and the `pread`. A write that fails part-way
+leaves what it wrote, a cut line that the next `appendLine` ends with its newline.
+Several writers' appends are whole lines only under a lock they share: `O_APPEND`
+makes each write land at the end, but a short write's rest is another write. -/
+def appendLine (path : System.FilePath) (bytes : ByteArray) : IO (Except UInt32 Bool) :=
+  appendLineRaw path.toString bytes
+
 /-- What the pipe at `fd` holds now, and no more: it never waits for a writer.
 It asks FIONREAD, which on macOS says 0 for a pty's master: for pipes only. -/
 @[extern "lean_posix_drain_now"]

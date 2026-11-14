@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/filio.h>
 #include <sys/ioctl.h>
@@ -128,4 +129,63 @@ LEAN_EXPORT lean_obj_res lean_posix_set_times(b_lean_obj_arg path, uint64_t ms) 
     v[0].tv_usec = (suseconds_t)(ms % 1000) * 1000;
     v[1] = v[0];
     return lean_io_result_mk_ok(lean_box_uint32(utimes(lean_string_cstr(path), v) == 0 ? 0u : (uint32_t)errno));
+}
+
+/* `appendLine`'s raw result: `Except UInt32 Bool`. */
+LEAN_EXPORT lean_obj_res lean_posix_append_line(b_lean_obj_arg path, b_lean_obj_arg bytes) {
+    size_t n = lean_sarray_size(bytes);
+    uint32_t e = 0;
+    int cut = 0;
+    if (n > 0) {
+        int fd = open(lean_string_cstr(path), O_RDWR | O_APPEND | O_CREAT | O_CLOEXEC, 0666);
+        struct stat st;
+        if (fd < 0) e = (uint32_t)errno;
+        else if (fstat(fd, &st) != 0) e = (uint32_t)errno;
+        else if (!S_ISREG(st.st_mode)) e = EFTYPE;
+        else if (st.st_size > 0) {
+            char last;
+            ssize_t r;
+            do r = pread(fd, &last, 1, st.st_size - 1);
+            while (r < 0 && errno == EINTR);
+            if (r < 0) e = (uint32_t)errno;
+            else if (r == 0) e = EIO; /* shrunk since the fstat */
+            else cut = last != '\n';
+        }
+        if (fd >= 0 && e == 0) {
+            /* One buffer, the newline first when the last line is cut, so that
+               a write of it all is one append. */
+            char *buf = NULL;
+            if (cut) {
+                buf = malloc(n + 1);
+                if (!buf) lean_internal_panic_out_of_memory();
+                buf[0] = '\n';
+                memcpy(buf + 1, lean_sarray_cptr(bytes), n);
+            }
+            const char *p = cut ? buf : (const char *)lean_sarray_cptr(bytes);
+            size_t left = cut ? n + 1 : n;
+            while (left > 0) {
+                ssize_t w = write(fd, p, left);
+                if (w > 0) {
+                    p += w;
+                    left -= (size_t)w;
+                } else if (w < 0 && errno == EINTR) continue;
+                else {
+                    e = w < 0 ? (uint32_t)errno : EIO;
+                    break;
+                }
+            }
+            free(buf);
+        }
+        /* A write's error may come only at the close: said when none came first. */
+        if (fd >= 0 && close(fd) != 0 && e == 0) e = (uint32_t)errno;
+    }
+    lean_object *res;
+    if (e != 0) {
+        res = lean_alloc_ctor(0, 1, 0);
+        lean_ctor_set(res, 0, lean_box_uint32(e));
+    } else {
+        res = lean_alloc_ctor(1, 1, 0);
+        lean_ctor_set(res, 0, lean_box(cut));
+    }
+    return lean_io_result_mk_ok(res);
 }
