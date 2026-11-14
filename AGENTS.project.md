@@ -68,6 +68,9 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   `pipe`, `waitpid`, `waitOutcome` (`ExitOutcome`: an exit code or a signal,
   decoded by `ExitOutcome.ofStatus` with theorems), `writeAll`. `spawnRaw` is public but internal to
   `trySpawn`. One process-wide lock (`spawnLock`) serializes `pipe` and spawn.
+  The C of `pipe`, `waitpid`, `waitOutcome` and `writeAll` is `c/spawn.c`,
+  with the constants and wait-status macros from the SDK's headers;
+  `spawnRaw` is still an inline expression.
 - `Lock.lean`: `lockFile`/`unlock`, `lockHanded` (a lock handed across
   exec; `lockHeld`, `lockElsewhere`), `lockDir`, `link`. `lockRaw` is public
   but internal to `lockFile`. Its C is `c/lock.c`, with `struct stat` and

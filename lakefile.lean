@@ -3,8 +3,8 @@ open Lake DSL
 
 package «lean-posix»
 
-/-- The bindings, `Posix.*`: those of `Posix.Spawn` are C expressions that
-declare what they call; the others are C functions of `c/*.c`,
+/-- The bindings, `Posix.*`: `Posix.Spawn`'s `spawnRaw` is a C expression that
+declares what it calls; the others are C functions of `c/*.c`,
 linked from `leanposixc`. -/
 @[default_target]
 lean_lib Posix
@@ -12,9 +12,10 @@ lean_lib Posix
 /-- `c/*.c`, compiled with the Lean toolchain's clang against the macOS SDK (Xcode
 or the Command Line Tools, found by `xcrun --show-sdk-path` at build time) and
 Lean's headers, every warning an error: `c/term.c`, `c/kqueue.c`, `c/pty.c`,
-`c/fd.c`, `c/lock.c` and `c/process.c`, the bindings of `Posix/Term.lean`,
-`Posix/Kqueue.lean`, `Posix/Pty.lean`, `Posix/Fd.lean`, `Posix/Lock.lean` and
-`Posix/Process.lean`, and `c/abi.c`, which
+`c/fd.c`, `c/lock.c`, `c/process.c` and `c/spawn.c`, the bindings of
+`Posix/Term.lean`, `Posix/Kqueue.lean`, `Posix/Pty.lean`, `Posix/Fd.lean`,
+`Posix/Lock.lean`, `Posix/Process.lean` and `Posix/Spawn.lean` (all but
+`spawnRaw`), and `c/abi.c`, which
 links nothing and fails the build when a
 number or struct layout an inline expression writes by hand differs from the
 SDK's. The SDK's path and build version are part of each object's trace, so

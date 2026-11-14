@@ -34,9 +34,11 @@ ignores SIGPIPE, and so does the child (`defaultSignals` restores it before an
 `exec`). Descriptors the parent has open without close-on-exec stay open in the
 child, as with Lean's spawn.
 
-The numbers are macOS's: F_GETFD 1, F_SETFD 2, FD_CLOEXEC 1, F_DUPFD_CLOEXEC 67, O_RDWR 2,
-O_CLOEXEC 0x1000000, EINTR 4, ENOENT 2, ENOTDIR 20, EACCES 13, EIO 5, TIOCSCTTY
-0x20007461, SIGKILL 9, the stop status's low 7 bits 0x7f.
+`pipe`, `waitpid`, `waitOutcome` and `writeAll` are C in `c/spawn.c`, which takes
+every constant and the wait-status macros from the SDK's headers. `spawnRaw` is
+still one inline expression, whose numbers are macOS's: F_GETFD 1, F_SETFD 2,
+FD_CLOEXEC 1, F_DUPFD_CLOEXEC 67, O_RDWR 2, O_CLOEXEC 0x1000000, EINTR 4, ENOENT 2,
+ENOTDIR 20, EACCES 13, EIO 5, TIOCSCTTY 0x20007461, SIGKILL 9.
 -/
 
 namespace Posix
@@ -126,7 +128,7 @@ def spawn (argv : Array String) (env : Array String := #[]) (stdin stdout stderr
     throw (IO.userError (if f.stage == "exec" then s!"cannot execute {name}: {why}"
       else s!"cannot start {name}: {f.stage}: {why}"))
 
-@[extern c inline "({ extern int pipe(int*); extern int fcntl(int, int, ...); extern int* __error(void); int p[2]; uint64_t r; if (pipe(p) != 0) r = (1ULL << 63) | (unsigned)*__error(); else { fcntl(p[0], 2, 1); fcntl(p[1], 2, 1); r = (uint64_t)(unsigned)p[0] | ((uint64_t)(unsigned)p[1] << 32); } lean_io_result_mk_ok(lean_box_uint64(r)); })"]
+@[extern "lean_posix_pipe_raw"]
 private opaque pipeRaw : IO UInt64
 
 /-- A pipe, its read end and its write end, both close-on-exec: `spawn` makes the
@@ -140,7 +142,7 @@ def pipe : IO (UInt32 × UInt32) := do
 /-- Waits for the child `pid` to exit and reaps it, past any EINTR: its exit status,
 or 128 plus the signal that ended it, as Lean's `Child.wait` gives them. Throws when
 `pid` is no child of this process to wait for. -/
-@[extern c inline "({ extern int waitpid(int, int*, int); extern int* __error(void); int s = 0, r; do r = waitpid((int)#1, &s, 0); while (r < 0 && *__error() == 4); r < 0 ? lean_io_result_mk_error(lean_decode_io_error(*__error(), NULL)) : lean_io_result_mk_ok(lean_box_uint32((s & 0x7f) == 0 ? (unsigned)((s >> 8) & 0xff) : 128u + (unsigned)(s & 0x7f))); })"]
+@[extern "lean_posix_waitpid"]
 opaque waitpid (pid : UInt32) : IO UInt32
 
 /-- How a child ended: it exited with a code, or a signal ended it. Unlike
@@ -175,7 +177,7 @@ theorem ExitOutcome.ofStatus_signaled (sig : UInt8) (core : Bool) (h0 : sig ≠ 
     cases core <;> simp only [Bool.false_eq_true, ite_true, ite_false] <;> bv_decide
   simp only [ofStatus, h1, h2, Bool.false_eq_true, ite_false]
 
-@[extern c inline "({ extern int waitpid(int, int*, int); extern int* __error(void); int s = 0, r; do r = waitpid((int)#1, &s, 0); while ((r < 0 && *__error() == 4) || (r >= 0 && (s & 0x7f) == 0x7f)); r < 0 ? lean_io_result_mk_error(lean_decode_io_error(*__error(), NULL)) : lean_io_result_mk_ok(lean_box_uint32((unsigned)s)); })"]
+@[extern "lean_posix_wait_status"]
 private opaque waitStatus (pid : UInt32) : IO UInt32
 
 /-- Waits for the child `pid` to exit and reaps it, past any EINTR: whether it
@@ -190,7 +192,7 @@ def waitOutcome (pid : UInt32) : IO ExitOutcome :=
 
 /-- Writes all of `bytes` to `fd`, past any EINTR and short write: 0, or the errno of
 the write that failed (EPIPE when the reader is gone, as Lean ignores SIGPIPE). -/
-@[extern c inline "({ extern long write(int, const void*, unsigned long); extern int* __error(void); size_t n = lean_sarray_size(#2), got = 0; unsigned e = 0; while (got < n) { long r = write((int)#1, lean_sarray_cptr(#2) + got, n - got); if (r > 0) got += (size_t)r; else if (r < 0 && *__error() == 4) continue; else { e = r < 0 ? (unsigned)*__error() : 5u; break; } } lean_io_result_mk_ok(lean_box_uint32(e)); })"]
+@[extern "lean_posix_write_all"]
 opaque writeAll (fd : UInt32) (bytes : @& ByteArray) : IO UInt32
 
 end Posix

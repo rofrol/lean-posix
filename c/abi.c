@@ -11,7 +11,6 @@
 #include <signal.h>
 #include <stddef.h>
 #include <sys/ioctl.h>
-#include <sys/wait.h>
 
 #define SAME(name, value) _Static_assert((name) == (value), #name " is " #value)
 
@@ -44,9 +43,6 @@ SAME(FD_CLOEXEC, 1);
 
 /* ioctl */
 SAME(TIOCSCTTY, 0x20007461UL);
-
-/* wait status */
-SAME(_WSTOPPED, 0x7f);
 
 /* struct layouts, as the expressions declare them */
 #define AT(type, field, offset) \
