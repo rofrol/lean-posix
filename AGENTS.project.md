@@ -60,8 +60,10 @@ Modules, each under `Posix/`, all in `namespace Posix`:
 - `Process.lean`: `exec` (`execvp` in place), `execResume` (`execv` of
   `path --resume`), `killNow` (SIGKILL to a process or group), `kill` (any signal, the errno), `alarm`,
   `defaultSignals`, `defaultPipe`, `processStart` (`proc_pidinfo` start time),
+  `sessionMembers` and `killSession` (a session's processes, ended by
+  SIGKILL in rounds that wait for their exits on a kqueue; `SessionKill`),
   `peakRss`. Its C is `c/process.c`, with `struct proc_bsdinfo`,
-  `struct rusage` and the constants from the SDK's headers.
+  `struct rusage`, `struct kevent` and the constants from the SDK's headers.
 - `Spawn.lean` (imports `Fd`): `trySpawn`/`spawn` (`posix_spawn` along
   `candidates`, the PATH lookup; optionally `POSIX_SPAWN_SETSID`; with `ctty`,
   through the helper below; `SpawnFailure`, `inherit`, `devNull`,
@@ -113,7 +115,8 @@ module imports another; nothing here imports a consumer. The tests import
   build uses; a hand-written function declaration in an expression is not
   checked, and the rest is caught only by `lake test` on that OS.
 - Privileged or process-wide effects: `exec`/`execResume` replace the
-  process; `killNow` and `kill` signal any pid or group the caller names;
+  process; `killNow` and `kill` signal any pid or group the caller names, and
+  `killSession` every process of a session it names but the caller's own;
   `catchSignals` catches the signals it is given process-wide with a no-op handler; `termCtl`
   installs handlers for every catchable terminating signal, ignores SIGTSTP,
   changes stdin's termios and writes escape sequences to stdout;

@@ -608,6 +608,84 @@ partial def readAll (fd : UInt32) (acc : ByteArray := .empty) : IO ByteArray := 
   let b ← read fd 4096
   if b.size == 0 then close fd; return acc else readAll fd (acc ++ b)
 
+/-- `killSession`: a session whose processes fork and exit while it is ended; a
+session whose leader has exited, its member in a process group of its own; a
+session of root's, every member refused; the sessions it refuses to name. Each
+step waits for what a child says on a pipe or for an exit, never for a time. -/
+def sessions (t : T) : IO Unit := do
+  -- Forks and exits during the kill: the leader starts a `sleep` and a `true` per
+  -- turn and says "started" after five turns, then keeps forking.
+  let (r, w) ← Posix.pipe
+  let loop := "i=0; while [ $i -lt 100 ]; do /bin/sleep 100 & /usr/bin/true & i=$((i+1)); \
+    if [ $i -eq 5 ]; then echo started; fi; done; wait"
+  let leader ← spawn #["/bin/sh", "-c", loop] (stdout := w) (setsid := true)
+  close w
+  let said ← linesOf r 1
+  let before ← sessionMembers leader
+  t.check "sessionMembers lists a forking session's processes"
+    (said == "started\n" && match before with | .ok m => m.contains leader && m.size ≥ 2 | .error _ => false)
+    s!"{said.quote} {repr before}"
+  let k ← killSession leader
+  t.check "killSession ends a session whose processes fork and exit meanwhile"
+    (match k with | .ok k => k.killed ≥ 2 && k.refused.isEmpty && k.left.isEmpty | .error _ => false) s!"{repr k}"
+  let after ← sessionMembers leader
+  t.check "and no member is left" (after == .ok #[]) s!"{repr after}"
+  let end_ ← waitOutcome leader
+  t.check "the leader died of SIGKILL" (end_ == .signaled 9) s!"{repr end_}"
+  t.check "every holder of the pipe's write end is gone" ((← readAll r).size == 0)
+  -- An exited leader, not reaped: its job, in a process group of its own (`set -m`),
+  -- keeps the session.
+  let (r, w) ← Posix.pipe
+  let leader ← spawn #["/bin/sh", "-c", "set -m; /bin/sleep 100 & echo $!"] (stdout := w) (setsid := true)
+  close w
+  let line ← linesOf r 1
+  let job := (line.trimAscii.toString.toNat?.getD 0).toUInt32
+  discard <| (← watchExits #[leader]).wait
+  let members ← sessionMembers leader
+  t.check "an exited leader not yet reaped is no member; its job in a group of its own is"
+    (members == .ok #[job]) s!"{repr members} job {job}"
+  let k ← killSession leader
+  t.check "killSession ends the session of an exited leader"
+    (k == .ok { killed := 1, refused := #[], left := #[] }) s!"{repr k}"
+  let gone ← processStart job
+  t.check "its job has exited" (gone matches .error 3) s!"{repr gone}"
+  let end_ ← waitOutcome leader
+  t.check "the leader had exited by itself" (end_ == .exited 0) s!"{repr end_}"
+  close r
+  -- A session of root's: notifyd, which launchd starts in a session of its own,
+  -- leads one. Only when notifyd leads it and this process may signal none of its
+  -- members (so not as root) is it asked to end it. A session gains members only
+  -- by a member's fork (setsid makes a new one, setpgid stays in the caller's), and
+  -- notifyd starts no programs, so the members checked are the ones killSession
+  -- finds; a process of root's cannot become this user's to signal unless it
+  -- gives up root itself.
+  let out ← IO.Process.output { cmd := "/usr/bin/pgrep", args := #["-x", "notifyd"] }
+  match out.stdout.trimAscii.toString.toNat? with
+  | none => t.check "one notifyd runs, to try a session of root's" false out.stdout.quote
+  | some n =>
+    let sid := n.toUInt32
+    let members ← sessionMembers sid
+    let mine ← match members with
+      | .ok m => do
+        let any ← m.anyM fun p => return (← kill p.toInt32 0) != 1
+        pure (any || !m.contains sid)
+      | .error _ => pure true
+    if mine then
+      t.check "skipped: a member of notifyd's session may be signalled by this process" true s!"{repr members}"
+    else
+      let k ← killSession sid
+      let want := members.toOption.getD #[] |>.map (·, (1 : UInt32))
+      t.check "killSession of root's session refuses every member with EPERM, and kills none"
+        (k == .ok { killed := 0, refused := want, left := #[] } && !want.isEmpty) s!"{repr k}"
+  t.check "killSession refuses session 0 and launchd's"
+    ((← killSession 0) == .error 22 && (← killSession 1) == .error 22)
+  let (r, w) ← Posix.pipe
+  let pid ← spawn #[(← IO.appPath).toString, "own-session"] (stdout := w) (setsid := true)
+  close w
+  let said := text (← readAll r)
+  discard <| waitpid pid
+  t.check "killSession refuses the caller's own session" (said == "22\n") said.quote
+
 /-- `trySpawn argv` with stdout on a pipe: what it printed and its status. -/
 def spawned (argv : Array String) (env : Array String := #[]) (stdin := inherit) (setsid := false) :
     IO (Except SpawnFailure (String × UInt32)) := do
@@ -866,6 +944,12 @@ def main (args : List String) : IO UInt32 := do
     let c := match child with | .signaled s => toString s | .exited e => s!"exit {e}"
     IO.println s!"{say a} {say b} {c}"
     return 0
+  | ["own-session"] =>
+    -- Started with `setsid`: the session's id is this process's pid.
+    match ← killSession (← IO.Process.getPID) with
+    | .error e => IO.println s!"{e}"
+    | .ok k => IO.println s!"ran {repr k}"
+    return 0
   | ["winch"] =>
     let kq ← kqOpen
     kqSetup kq
@@ -959,6 +1043,7 @@ def main (args : List String) : IO UInt32 := do
     locks t dir
     kq t dir
     exits t
+    sessions t
     kqView t dir
     starts t
     processes t

@@ -16,7 +16,7 @@ their shells hold no C of their own.
 | --------------- | ----------------------------------------------------------------- |
 | `Posix.Fd`      | `dup`, `dup2`, `close`, `read`, `pread`, a pipe drained without waiting, the descriptor under a `Handle`, `isatty`, `strerror`, a file's times (`utimes`), a file's device, inode, size and bytes from an offset, on one descriptor (`fstat`, `pread`) |
 | `Posix.Pty`     | a raw pty (`openpty`), `login_tty`, the window size, read and set  |
-| `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, `alarm`, default signals before exec, a process's start time (`proc_pidinfo`), peak RSS |
+| `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, the processes of a session and the end of all of them (`proc_listallpids`, `getsid`, SIGKILL in rounds until none is left), `alarm`, default signals before exec, a process's start time (`proc_pidinfo`), peak RSS |
 | `Posix.Spawn`   | a spawn that says whether its exec failed (`posix_spawn` along PATH, no `fork`), in a session of its own, on a controlling terminal if asked (through the helper `lean-posix-ctty`), `pipe`, `waitpid`, `waitOutcome` (an exit code kept apart from a signal), a write of every byte |
 | `Posix.Lock`    | exclusive `flock` on a file or a directory, such a lock handed to the next program this process executes (`fstat`, `stat`), `link` that fails on a taken name |
 | `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; the exits of processes that need not be children; stdin, SIGWINCH, files and exits of processes for a full-screen program, waited for with or without a timeout |
