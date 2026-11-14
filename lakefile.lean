@@ -43,13 +43,15 @@ extern_lib leanposixc pkg := do
   buildStaticLib (pkg.staticLibDir / nameToStaticLib "leanposixc") objs
 
 /-- `lean-posix-ctty`, the helper through which `Posix.trySpawn ... (ctty := true)`
-starts a program on a controlling terminal (`helper/ctty.c`, which states its
-protocol; `docs/decisions/0001-ctty-helper.md`): a C executable linked with
-libSystem only, compiled and linked with the Lean toolchain's clang against the
-macOS SDK, every warning an error. It is written to the bin directory of the
+starts a program on a controlling terminal, and `(record := some fd)` one that
+records its identity first (`helper/ctty.c`, which states its protocol;
+`docs/decisions/0001-ctty-helper.md`, `0002-spawn-record.md`): a C executable linked with
+libSystem only, compiled and linked with the Lean toolchain's clang and its own
+compiler headers (`stdbool.h`, which `libproc.h` includes) against the macOS SDK,
+every warning an error. It is written to the bin directory of the
 workspace's root package, `.lake/build/bin`, next to that package's executables,
 where `trySpawn` looks for it (next to `IO.appPath`). A package that spawns with
-`ctty` builds it (`lake build lean-posix/lean-posix-ctty`, or through `needs`) and
+`ctty` or `record` builds it (`lake build lean-posix/lean-posix-ctty`, or through `needs`) and
 installs it next to its executables. A default target here, and needed by
 `tests`. -/
 @[default_target]
@@ -57,7 +59,8 @@ target «lean-posix-ctty» pkg : System.FilePath := do
   let lean ← getLeanInstall
   let (sdk, sdkTrace) ← macSdk
   let obj ← buildO (pkg.buildDir / "helper" / "ctty.o") (← inputTextFile (pkg.dir / "helper" / "ctty.c"))
-    #["-isysroot", sdk] #["-O2", "-Wall", "-Wextra", "-Werror"] lean.cc sdkTrace
+    #["-I", (lean.includeDir / "clang").toString, "-isysroot", sdk] #["-O2", "-Wall", "-Wextra", "-Werror"]
+    lean.cc sdkTrace
   let exe := (← getRootPackage).binDir / "lean-posix-ctty"
   obj.mapM fun o => do
     addTrace (← sdkTrace)

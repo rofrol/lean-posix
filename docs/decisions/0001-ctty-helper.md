@@ -74,7 +74,9 @@ executables; the library finds it next to `IO.appPath` by default, so
 to the root package's `.lake/build/bin`; a missing helper fails at the stage
 `ctty helper` with the errno of its `posix_spawn` (ENOENT), and a helper that
 does not greet with protocol version 1 fails there with EPROTONOSUPPORT. The
-protocol is in `helper/ctty.c`'s header. Option B is rejected on the evidence above; option C was
+protocol is in `helper/ctty.c`'s header; version 2 (item qgxw6v,
+`docs/decisions/0002-spawn-record.md`) adds the identity record and makes
+the terminal optional, and the helper serves `record` spawns too. Option B is rejected on the evidence above; option C was
 recommended by neither model.
 
 Why A over D (the owner, 2026-11-14, on the coordinating session's

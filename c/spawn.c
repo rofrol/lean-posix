@@ -68,7 +68,8 @@ LEAN_EXPORT lean_obj_res lean_posix_write_all(uint32_t fd, b_lean_obj_arg bytes)
 }
 
 /* The stages of a failed spawn, as `SpawnFailure.ofStage` decodes them. The
-   ctty helper (helper/ctty.c) reports 0, 3 and 7 with the same numbers. */
+   ctty helper (helper/ctty.c) reports 0, 3, 7 and 9 (the identity record)
+   with the same numbers. */
 enum {
     STAGE_EXEC = 0,
     STAGE_DEVNULL = 1,
@@ -78,13 +79,13 @@ enum {
     STAGE_HELPER = 8
 };
 
-/* The ctty helper's protocol, version 1, which helper/ctty.c speaks too: its
+/* The ctty helper's protocol, version 2, which helper/ctty.c speaks too: its
    first argument is the marker, and the first 8 bytes it writes to the result
    pipe are the greeting. A helper of another version refuses the marker and
    writes no greeting. `lake test` spawns through the helper, so a mismatch
    between the two copies fails it. */
-#define CTTY_MARKER "--lean-posix-ctty-v1"
-#define CTTY_GREETING "lpctty1\n"
+#define CTTY_MARKER "--lean-posix-ctty-v2"
+#define CTTY_GREETING "lpctty2\n"
 
 static uint64_t failed(int stage, int err) {
     return (1ULL << 63) | ((uint64_t)(stage & 0xff) << 32) | (uint32_t)err;
@@ -126,24 +127,29 @@ static void kill_and_reap(pid_t pid) {
     while (waitpid(pid, &s, 0) < 0 && errno == EINTR) {}
 }
 
-/* The ctty spawn: the helper at `helper`, given the child's descriptors and
-   environment, does setsid, TIOCSCTTY and the execve along `c`; what it
-   reports on the result pipe `p` decides. */
+/* The spawn through the helper: the helper at `helper`, given the child's
+   descriptors and environment, does setsid and TIOCSCTTY when asked, writes
+   the identity record to `record` when it is not 0, and the execve along `c`;
+   what it reports on the result pipe `p` decides. */
 static uint64_t spawn_ctty(const char *helper, posix_spawn_file_actions_t *fa, posix_spawnattr_t *at, int p[2],
-                           char **c, size_t nc, char **argv, size_t na, char **env, int setsid_) {
-    char wfd[16], count[24];
+                           char **c, size_t nc, char **argv, size_t na, char **env, int setsid_, int ctty,
+                           int record) {
+    char wfd[16], rfd[16], count[24];
     snprintf(wfd, sizeof wfd, "%d", p[1]);
+    snprintf(rfd, sizeof rfd, "%d", record);
     snprintf(count, sizeof count, "%zu", nc);
-    char **v = malloc((5 + nc + na + 1) * sizeof(char *));
+    char **v = malloc((7 + nc + na + 1) * sizeof(char *));
     if (!v) lean_internal_panic_out_of_memory();
     v[0] = (char *)helper;
     v[1] = CTTY_MARKER;
     v[2] = wfd;
     v[3] = setsid_ ? "1" : "0";
-    v[4] = count;
-    for (size_t i = 0; i < nc; i++) v[5 + i] = c[i];
-    for (size_t i = 0; i < na; i++) v[5 + nc + i] = argv[i];
-    v[5 + nc + na] = NULL;
+    v[4] = ctty ? "1" : "0";
+    v[5] = rfd;
+    v[6] = count;
+    for (size_t i = 0; i < nc; i++) v[7 + i] = c[i];
+    for (size_t i = 0; i < na; i++) v[7 + nc + i] = argv[i];
+    v[7 + nc + na] = NULL;
     pid_t pid = 0;
     int r = posix_spawn(&pid, helper, fa, at, v, env);
     free(v);
@@ -182,7 +188,7 @@ static uint64_t spawn_ctty(const char *helper, posix_spawn_file_actions_t *fa, p
 LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg argv, b_lean_obj_arg envs,
                                           uint32_t in, uint32_t out, uint32_t err, uint8_t setsid_,
                                           uint8_t ctty, uint8_t only, b_lean_obj_arg keep,
-                                          b_lean_obj_arg helper) {
+                                          uint32_t record, b_lean_obj_arg helper) {
     extern char **environ;
     size_t nc = lean_array_size(paths), na = lean_array_size(argv), ne = lean_array_size(envs), nv = 0;
     while (environ[nv]) nv++;
@@ -224,12 +230,15 @@ LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg a
         if (fds[i] >= 0 && fcntl(fds[i], F_GETFD) < 0) res = failed(STAGE_DUP2, errno);
     for (size_t i = 0; i < nk && !res; i++)
         if (fcntl((int)lean_unbox_uint32(lean_array_get_core(keep, i)), F_GETFD) < 0) res = failed(STAGE_DUP2, errno);
+    if (!res && record != 0 && fcntl((int)record, F_GETFD) < 0) res = failed(STAGE_DUP2, errno);
+    /* Through the helper: for a controlling terminal, or the identity record. */
+    int helped = ctty || record != 0;
     if (!res && (fds[0] == -2 || fds[1] == -2 || fds[2] == -2)) {
         nul = open("/dev/null", O_RDWR | O_CLOEXEC);
         if (nul >= 0) nul = above2(nul);
         if (nul < 0) res = failed(STAGE_DEVNULL, errno);
     }
-    if (!res && ctty) {
+    if (!res && helped) {
         if (pipe(p) != 0) res = failed(STAGE_PIPE, errno);
         else {
             fcntl(p[0], F_SETFD, FD_CLOEXEC);
@@ -254,9 +263,14 @@ LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg a
             r = posix_spawn_file_actions_adddup2(&fa, src, i);
             if (r != 0) res = failed(STAGE_DUP2, r);
         }
-        if (!res && ctty) {
+        if (!res && helped) {
             /* The helper's end of the result pipe, which it makes close-on-exec again. */
             r = posix_spawn_file_actions_addinherit_np(&fa, p[1]);
+            if (r != 0) res = failed(STAGE_DUP2, r);
+        }
+        if (!res && record != 0) {
+            /* The record's descriptor, which the helper closes before its exec. */
+            r = posix_spawn_file_actions_addinherit_np(&fa, (int)record);
             if (r != 0) res = failed(STAGE_DUP2, r);
         }
         /* Under POSIX_SPAWN_CLOEXEC_DEFAULT only what the actions name stays
@@ -272,7 +286,7 @@ LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg a
             r = posix_spawn_file_actions_addinherit_np(&fa, (int)lean_unbox_uint32(lean_array_get_core(keep, i)));
             if (r != 0) res = failed(STAGE_DUP2, r);
         }
-        if (res && ctty) {
+        if (res && helped) {
             close(p[0]);
             close(p[1]);
         }
@@ -287,14 +301,14 @@ LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg a
         if (r == 0) r = posix_spawnattr_setflags(&at, flags);
         if (r != 0) {
             res = failed(STAGE_EXEC, r);
-            if (ctty) {
+            if (helped) {
                 close(p[0]);
                 close(p[1]);
             }
         }
     }
-    if (!res && ctty) {
-        res = spawn_ctty(lean_string_cstr(helper), &fa, &at, p, c, nc, v, na, e, setsid_);
+    if (!res && helped) {
+        res = spawn_ctty(lean_string_cstr(helper), &fa, &at, p, c, nc, v, na, e, setsid_ && ctty, ctty, (int)record);
     } else if (!res) {
         int r;
         /* Each path in turn, as execvp tries them: one the kernel finds no file

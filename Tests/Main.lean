@@ -217,9 +217,9 @@ def cttyHelper (t : T) (dir : System.FilePath) : IO Unit := do
   t.check "a ctty spawn whose exec fails says so, with its errno" failed s!"{repr r}"
   close s; close m
   let helper := ((← IO.appPath).parent.getD ".") / cttyHelperName
-  let out ← IO.Process.output { cmd := helper.toString, args := #["--lean-posix-ctty-v2", "3", "0", "0"] }
+  let out ← IO.Process.output { cmd := helper.toString, args := #["--lean-posix-ctty-v1", "3", "0", "0", "0", "0"] }
   t.check "the helper refuses another protocol version, with exit status 127"
-    (out.exitCode == 127 && contains out.stderr "protocol --lean-posix-ctty-v1") s!"{out.exitCode} {out.stderr.quote}"
+    (out.exitCode == 127 && contains out.stderr "protocol --lean-posix-ctty-v2") s!"{out.exitCode} {out.stderr.quote}"
   let alone ← cttySpawnFrom (dir / "alone")
   t.check "without the helper next to the program, a ctty spawn fails at ctty helper with ENOENT"
     (alone == "ctty helper 2\n") alone.quote
@@ -331,6 +331,85 @@ def kept (t : T) (dir : System.FilePath) : IO Unit := do
   t.check "a kept descriptor that is not open fails at dup2 with EBADF" (r == .error { stage := "dup2", errno := 9 }) s!"{repr r}"
   let refused ← (do discard <| trySpawn #["true"] (keep := some #[2]); pure false) <|> pure true
   t.check "a kept descriptor 0, 1 or 2 is refused before anything starts" refused
+  close pr; close pw
+
+/-- The line `PID SID START` a `record` spawn wrote to `path`, as numbers. -/
+def recordAt (path : System.FilePath) : IO (List Nat) := do
+  let l ← IO.FS.readFile path
+  return if l.endsWith "\n" then ((l.dropEnd 1).toString.splitOn " ").filterMap String.toNat? else []
+
+/-- `record`: the child's pid, session and start are in the file before its
+program runs, and the file's lock is free once the caller let go of its own
+while the program still runs; with `ctty` too; a record that cannot be written
+runs no program; an exec that fails after it leaves the line; what it refuses. -/
+def records (t : T) (dir : System.FilePath) : IO Unit := do
+  let path := dir / "record"
+  let .ok fd ← lockFile path false | t.check "lockFile takes the record's lock" false
+  let (ir, iw) ← Posix.pipe
+  let pid ← spawn #["cat"] #[] ir devNull (setsid := true) (record := some fd)
+  close ir
+  let start ← processStart pid
+  unlock fd
+  match ← lockFile path false with
+  | .error e => t.check "record: the lock is free once the caller let go, while the program runs" false s!"errno {e}"
+  | .ok again =>
+    t.check "record: the lock is free once the caller let go, while the program runs" true
+    let line ← recordAt path
+    t.check "the record is the child's pid, its session and its start"
+      (match start with | .ok st => line == [pid.toNat, pid.toNat, st] | .error _ => false)
+      s!"{line} pid {pid} start {repr start}"
+    unlock again
+  close iw
+  let end_ ← waitOutcome pid
+  t.check "and the program ran" (end_ == .exited 0) s!"{repr end_}"
+  -- Without setsid, the session is the caller's, which the child does not lead.
+  let path := dir / "record-nosid"
+  let .ok fd ← lockFile path false | t.check "lockFile takes the record's lock" false
+  let pid ← spawn #["true"] (record := some fd)
+  unlock fd
+  let line ← recordAt path
+  t.check "without setsid the record's session is not the child's own"
+    (match line with | [p, s, _] => p == pid.toNat && s != p | _ => false) s!"{line} pid {pid}"
+  discard <| waitpid pid
+  -- With ctty, through the same helper.
+  let path := dir / "record-ctty"
+  let .ok fd ← lockFile path false | t.check "lockFile takes the record's lock" false
+  let (m, s) ← openPty
+  let r ← trySpawn #["true"] #[] s s s (setsid := true) (ctty := true) (record := some fd)
+  close s; close m
+  unlock fd
+  match r with
+  | .error f => t.check "a ctty spawn with record runs" false s!"{repr f}"
+  | .ok pid =>
+    let line ← recordAt path
+    t.check "a ctty spawn with record: the child leads its session" (line.take 2 == [pid.toNat, pid.toNat]) s!"{line} pid {pid}"
+    discard <| waitpid pid
+  -- A descriptor the record cannot be written to: no program runs.
+  IO.FS.writeFile (dir / "record-ro") ""
+  let h ← IO.FS.Handle.mk (dir / "record-ro") .read
+  let ran := dir / "record-ran"
+  let r ← trySpawn #["/usr/bin/touch", ran.toString] (record := some (← handleFd h))
+  t.check "a record that cannot be written fails the spawn at record, the program not run"
+    (r == .error { stage := "record", errno := 9 } && !(← ran.pathExists)) s!"{repr r}"
+  discard h.isTty
+  -- An exec that fails after the record: the line of a process that ran nothing.
+  let path := dir / "record-noexec"
+  let .ok fd ← lockFile path false | t.check "lockFile takes the record's lock" false
+  let r ← trySpawn #[(dir / "missing").toString] (record := some fd)
+  unlock fd
+  let line ← recordAt path
+  let gone ← match line with | p :: _ => processStart p.toUInt32 | [] => pure (.ok 0)
+  t.check "an exec that fails after the record fails at exec and leaves the line of a process gone"
+    (r == .error { stage := "exec", errno := 2 } && line.length == 3 && gone matches .error 3) s!"{repr r} {line}"
+  -- What record refuses.
+  let r ← trySpawn #["true"] (record := some 999)
+  t.check "a record descriptor that is not open fails at dup2 with EBADF" (r == .error { stage := "dup2", errno := 9 }) s!"{repr r}"
+  let (pr, pw) ← Posix.pipe
+  for (name, act) in [("0, 1 or 2", trySpawn #["true"] (record := some 1)),
+      ("a stream's source", trySpawn #["true"] #[] inherit pw (record := some pw)),
+      ("kept", trySpawn #["true"] (keep := some #[pw]) (record := some pw))] do
+    let refused ← (do discard act; pure false) <|> pure true
+    t.check s!"a record descriptor that is {name} is refused before anything starts" refused
   close pr; close pw
 
 /-- The exit status of `tests lock-handed PATH FD` with `fd`, and `open` (a shell
@@ -1138,6 +1217,7 @@ def main (args : List String) : IO UInt32 := do
     cttyHelper t dir
     inherited t dir
     kept t dir
+    records t dir
     locks t dir
     kq t dir
     exits t

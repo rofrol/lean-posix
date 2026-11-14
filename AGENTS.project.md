@@ -67,7 +67,8 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   `struct rusage`, `struct kevent` and the constants from the SDK's headers.
 - `Spawn.lean` (imports `Fd`): `trySpawn`/`spawn` (`posix_spawn` along
   `candidates`, the PATH lookup; optionally `POSIX_SPAWN_SETSID`; with `ctty`,
-  through the helper below; with `keep`, the child gets the descriptors named
+  through the helper below, as with `record` (the child's pid, session and
+  start written by the helper before the exec); with `keep`, the child gets the descriptors named
   and no other, by `POSIX_SPAWN_CLOEXEC_DEFAULT`; `SpawnFailure`, `inherit`, `devNull`,
   `cttyHelperName`), `pipe`, `waitpid`, `waitOutcome` (`ExitOutcome`: an exit
   code or a signal, decoded by `ExitOutcome.ofStatus` with theorems),
@@ -76,10 +77,12 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   `c/spawn.c`, with the constants and wait-status macros from the SDK's
   headers.
 - `helper/ctty.c`: the executable `lean-posix-ctty`, the Lake target of that
-  name, through which a `ctty` spawn starts its program: `setsid`,
-  `ioctl(TIOCSCTTY)`, the `execve`s, and a failure reported on a
+  name, through which a `ctty` or `record` spawn starts its program: `setsid`,
+  `ioctl(TIOCSCTTY)`, the child's identity line written and synced to the
+  `record` descriptor, the `execve`s, and a failure reported on a
   close-on-exec result pipe, in a versioned protocol stated in its header and
-  spoken by `c/spawn.c` (`docs/decisions/0001-ctty-helper.md`). Not linked
+  spoken by `c/spawn.c` (`docs/decisions/0001-ctty-helper.md`,
+  `docs/decisions/0002-spawn-record.md`). Not linked
   into anything; Lake writes it to the root package's `.lake/build/bin`, and
   `trySpawn` looks for it next to `IO.appPath`.
 - `Lock.lean`: `lockFile`/`unlock`, `lockHanded` (a lock handed across
@@ -124,7 +127,7 @@ module imports another; nothing here imports a consumer. The tests import
   changes stdin's termios and writes escape sequences to stdout;
   `defaultSignals`/`defaultPipe` change signal dispositions; `trySpawn`
   starts processes with `posix_spawn`, never `fork`, and a `ctty` spawn runs
-  the executable `lean-posix-ctty` it finds next to `IO.appPath` with the
+  (and a `record` one) the executable `lean-posix-ctty` it finds next to `IO.appPath` with the
   child's descriptors and environment: whoever can write that directory
   decides what runs there, as they decide the program itself.
 - Arguments are passed to `execve`/`execvp` as an array, never through a
@@ -133,9 +136,10 @@ module imports another; nothing here imports a consumer. The tests import
   the caller's paths.
 - Deployment: the library is linked into consumers through `leanposixc`; the
   one separate piece is the `lean-posix-ctty` helper, which a consumer that
-  spawns with `ctty` builds (`lake build lean-posix/lean-posix-ctty` writes it
+  spawns with `ctty` or `record` builds (`lake build lean-posix/lean-posix-ctty` writes it
   to the consumer's own `.lake/build/bin`) and installs next to its
-  executables. Without it such a spawn fails at `ctty helper`.
+  executables, from the same pin (the protocol is versioned). Without it such
+  a spawn fails at `ctty helper`.
 
 ## Consumers
 

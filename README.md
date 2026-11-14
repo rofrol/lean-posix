@@ -17,7 +17,7 @@ their shells hold no C of their own.
 | `Posix.Fd`      | `dup`, `dup2`, `close`, `read`, `pread`, a pipe drained without waiting, the descriptor under a `Handle`, `isatty`, `strerror`, a file's times (`utimes`), a file's device, inode, size and bytes from an offset, on one descriptor (`fstat`, `pread`), a line appended after a check of the last byte, on one descriptor (`O_APPEND`, `fstat`, `pread`, `write`) |
 | `Posix.Pty`     | a raw pty (`openpty`), `login_tty`, the window size, read and set  |
 | `Posix.Process` | `execvp`, `execv` of a new build, `kill` of a process or group, the processes of a session and the end of all of them (`proc_listallpids`, `getsid`, SIGKILL in rounds until none is left), `alarm`, default signals before exec, a process's start time (`proc_pidinfo`), peak RSS |
-| `Posix.Spawn`   | a spawn that says whether its exec failed (`posix_spawn` along PATH, no `fork`), in a session of its own, on a controlling terminal if asked (through the helper `lean-posix-ctty`), handing the child the descriptors named and no other if asked (`POSIX_SPAWN_CLOEXEC_DEFAULT`, `posix_spawn_file_actions_addinherit_np`), `pipe`, `waitpid`, `waitOutcome` (an exit code kept apart from a signal), a write of every byte |
+| `Posix.Spawn`   | a spawn that says whether its exec failed (`posix_spawn` along PATH, no `fork`), in a session of its own, on a controlling terminal if asked (through the helper `lean-posix-ctty`), handing the child the descriptors named and no other if asked (`POSIX_SPAWN_CLOEXEC_DEFAULT`, `posix_spawn_file_actions_addinherit_np`), the child's pid, session and start written and synced to a descriptor before its program runs if asked (through the same helper), `pipe`, `waitpid`, `waitOutcome` (an exit code kept apart from a signal), a write of every byte |
 | `Posix.Lock`    | exclusive `flock` on a file or a directory, such a lock handed to the next program this process executes (`fstat`, `stat`), `link` that fails on a taken name |
 | `Posix.Kqueue`  | kqueue: a process's exit with its output pipe and a directory; the exits of processes that need not be children; stdin, SIGWINCH, files and exits of processes for a full-screen program, waited for with or without a timeout |
 | `Posix.Term`    | a full-screen terminal in raw mode, with click or any-motion mouse reports or none, restored (mouse reports off, the pointer shape reset) on every exit and signal that can be caught, and handed to a new build across `exec` |
@@ -54,7 +54,7 @@ require «lean-posix» from git "https://github.com/rofrol/lean-posix" @ "<commi
 and `import Posix`. Pin a commit; each pinned commit carries a tag `pin/<sha12>`
 so it stays fetchable.
 
-A program that spawns with `ctty := true` needs the helper `lean-posix-ctty`
+A program that spawns with `ctty := true` or `record := some fd` needs the helper `lean-posix-ctty`
 next to its own executable, where `trySpawn` looks for it (beside
 `IO.appPath`): `lake build lean-posix/lean-posix-ctty` builds it into the
 package's `.lake/build/bin`, or name it in an executable's `needs`

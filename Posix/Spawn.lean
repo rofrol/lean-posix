@@ -27,8 +27,12 @@ controlling terminal, so a spawn with `ctty` starts the helper `lean-posix-ctty`
 (`helper/ctty.c`, the Lake target of that name, with the protocol in its
 header), which does `setsid`, `ioctl(TIOCSCTTY)` and the `execve`s, and reports
 a failure through a pipe whose write end closes on exec
-(`docs/decisions/0001-ctty-helper.md`). The helper is looked for next to
-`IO.appPath`: a program that spawns with `ctty` installs it there.
+(`docs/decisions/0001-ctty-helper.md`). A spawn with `record` goes through it
+too: no code of the caller's runs in a `posix_spawn` child before its exec, so
+the helper writes the child's identity (pid, session, start time) to the
+descriptor given, durably, before it executes the program
+(`docs/decisions/0002-spawn-record.md`). The helper is looked for next to
+`IO.appPath`: a program that spawns with `ctty` or `record` installs it there.
 
 macOS has no `pipe2`, so a pipe (`pipe`, and the result pipe of a `ctty`
 spawn) is made close-on-exec in a second call, and a spawn in another thread in
@@ -62,7 +66,7 @@ initialize spawnLock : Std.Mutex Unit ← Std.Mutex.new ()
 
 @[extern "lean_posix_spawn"]
 private opaque spawnC (paths argv env : @& Array String) (stdin stdout stderr : UInt32) (setsid ctty : Bool)
-  (only : Bool) (keep : @& Array UInt32) (helper : @& String) : IO UInt64
+  (only : Bool) (keep : @& Array UInt32) (record : UInt32) (helper : @& String) : IO UInt64
 
 /-- The name of the ctty helper's executable, which `trySpawn` looks for in the
 directory of `IO.appPath`. -/
@@ -84,22 +88,24 @@ get. Each of
 or `inherit` or `devNull`. The pid; or, with the high bit set, what failed in bits
 32 to 39 (0 the exec, 1 opening `/dev/null`, 2 `dup2`, 3 `setsid`, 4 `pipe`, 6 a
 result pipe that failed or gave a record cut short, the child then killed, 7
-`ioctl(TIOCSCTTY)`, 8 the ctty helper) and its errno in the low 32 bits; 3 only
-with `ctty`, since a spawn without it makes the session with
+`ioctl(TIOCSCTTY)`, 8 the ctty helper, 9 the identity record) and its errno in
+the low 32 bits; 3 only with `ctty`, since a spawn without it makes the session with
 `POSIX_SPAWN_SETSID`, whose failure comes back as the exec's. A source
 descriptor that is not open is refused at `dup2` before anything is made, so no
 descriptor made here can take its number. A child whose setup or exec failed is
 reaped before this returns. With `ctty`, the child is started through the helper
-`cttyHelperName` next to `IO.appPath`. With `keep` some descriptors, each above
+`cttyHelperName` next to `IO.appPath`, and so with `record`, a descriptor above 2
+and below 2^31 that is neither a stream's source nor kept, which the caller makes
+sure of (`trySpawn` throws otherwise). With `keep` some descriptors, each above
 2 and below 2^31, which the caller makes sure of as for the three streams
 (`trySpawn` throws otherwise), and open (one that is not is refused at `dup2`
 like a source), the child has
 its 0, 1 and 2 and those only; `none` leaves it every descriptor the parent has
 without close-on-exec. -/
 def spawnRaw (paths argv env : @& Array String) (stdin stdout stderr : UInt32) (setsid ctty : Bool)
-    (keep : Option (Array UInt32) := none) : IO UInt64 := do
-  spawnC paths argv env stdin stdout stderr setsid ctty keep.isSome (keep.getD #[])
-    (← if ctty then cttyHelperPath else pure "")
+    (keep : Option (Array UInt32) := none) (record : Option UInt32 := none) : IO UInt64 := do
+  spawnC paths argv env stdin stdout stderr setsid ctty keep.isSome (keep.getD #[]) (record.getD 0)
+    (← if ctty || record.isSome then cttyHelperPath else pure "")
 
 /-- The paths `execvp` would try for `name`, from `path`, the value of PATH. -/
 def candidates (name : String) (path : Option String) : Array String :=
@@ -113,11 +119,12 @@ structure SpawnFailure where
   /-- `exec` when the program could not be executed, or `posix_spawn` failed
   for it (macOS returns both as one errno); otherwise the step of the setup
   before it that failed: `open /dev/null`, `dup2`, `setsid`, `TIOCSCTTY`,
-  `pipe`, `the result pipe` for a record cut short, or `ctty helper` when the
-  helper of a `ctty` spawn could not be started (the errno of its
-  `posix_spawn`, ENOENT when it is missing) or did not greet in this library's
-  protocol version (EPROTONOSUPPORT: a helper of another version, or one that
-  died first). `setsid` is said only with `ctty`: without it the session is made
+  `pipe`, `the result pipe` for a record cut short, `record` when the identity
+  record of a `record` spawn could not be obtained, written, synced or closed (the
+  program then not run), or `ctty helper` when the helper of a `ctty` or `record`
+  spawn could not be started (the errno of its `posix_spawn`, ENOENT when it is
+  missing) or did not greet in this library's protocol version
+  (EPROTONOSUPPORT: a helper of another version, or one that died first). `setsid` is said only with `ctty`: without it the session is made
   by `posix_spawn`, whose failure is said as `exec`. -/
   stage : String
   errno : UInt32
@@ -131,6 +138,7 @@ def SpawnFailure.ofStage : UInt32 → String
   | 4 => "pipe"
   | 7 => "TIOCSCTTY"
   | 8 => "ctty helper"
+  | 9 => "record"
   | _ => "the result pipe"
 
 /-- Starts `argv` (its first word the program, looked up on PATH as `execvp` does
@@ -159,25 +167,49 @@ failure. Each of `fds` must be open, else the spawn fails at `dup2` with EBADF
 before anything is made; the caller keeps them open until this returns. With
 `keep := none`, the child also gets every descriptor the parent has open without
 close-on-exec. Throws, starting nothing, when a kept descriptor is 0, 1 or 2 or
-not below 2^31. -/
+not below 2^31.
+
+With `record := some fd`, the child publishes its own identity before its
+program runs: it is started through the helper, which, once the session is made
+(`setsid`) and the terminal taken (`ctty`), writes the line `PID SID START\n`
+(decimal: the child's pid, which the program keeps; its session, the pid itself
+with `setsid`; and its start, in microseconds since the epoch, as
+`processStart` gives it) to `fd` at its offset, `fsync`s it and closes its copy,
+and only then executes the program, which never holds `fd`. When that fails,
+the program does not run and the spawn fails at `record` with the errno. A
+failed exec after it leaves the line of a process that ran nothing. `fd` is the
+caller's, and stays open in the caller. The line is in the file before any code
+of the program runs, whatever becomes of the caller meanwhile; the `fsync` is no
+promise against a loss of the disk's own cache. An exclusive `flock` the caller
+holds on `fd` (`lockFile`) is held by the child's copy too until the line is
+written: a process that takes that lock on the file once the caller has let go
+of it (closed its descriptor, or died) finds the whole line there when the
+program ran; else nothing, or the start of a line, without its newline, that a
+failed or killed write left: only a line that ends in its newline is a record. Throws, starting nothing, when `fd` is 0, 1 or 2, not below 2^31, a
+stream's source or kept. -/
 def trySpawn (argv : Array String) (env : Array String := #[]) (stdin stdout stderr : UInt32 := inherit)
-    (setsid ctty := false) (keep : Option (Array UInt32) := none) : IO (Except SpawnFailure UInt32) := do
+    (setsid ctty := false) (keep : Option (Array UInt32) := none) (record : Option UInt32 := none) :
+    IO (Except SpawnFailure UInt32) := do
   for fd in [stdin, stdout, stderr] do
     unless fd == inherit || fd == devNull || fd > 2 do
       throw (IO.userError s!"Posix.spawn: descriptor {fd} is one of the child's 0, 1 and 2: give inherit")
   for fd in keep.getD #[] do
     unless fd > 2 && fd < 0x80000000 do
       throw (IO.userError s!"Posix.spawn: descriptor {fd} cannot be kept: it is one of the child's 0, 1 and 2, or no descriptor")
+  if let some fd := record then
+    unless fd > 2 && fd < 0x80000000 && ![stdin, stdout, stderr].contains fd && !(keep.getD #[]).contains fd do
+      throw (IO.userError s!"Posix.spawn: descriptor {fd} cannot take the record: it is one of the child's 0, 1 and 2, a stream's source, kept, or no descriptor")
   let paths := candidates (argv[0]?.getD "") (← IO.getEnv "PATH")
-  let r ← spawnLock.atomically do spawnRaw paths argv env stdin stdout stderr setsid ctty keep
+  let r ← spawnLock.atomically do spawnRaw paths argv env stdin stdout stderr setsid ctty keep record
   if r >>> 63 == 0 then return .ok r.toUInt32
   return .error { stage := SpawnFailure.ofStage ((r >>> 32) &&& 0xff).toUInt32, errno := r.toUInt32 }
 
 /-- `trySpawn`, throwing why no program runs: `cannot execute NAME: REASON`, or
 `cannot start NAME: STAGE: REASON` for a failure of the setup before the exec. -/
 def spawn (argv : Array String) (env : Array String := #[]) (stdin stdout stderr : UInt32 := inherit)
-    (setsid ctty := false) (keep : Option (Array UInt32) := none) : IO UInt32 := do
-  match ← trySpawn argv env stdin stdout stderr setsid ctty keep with
+    (setsid ctty := false) (keep : Option (Array UInt32) := none) (record : Option UInt32 := none) :
+    IO UInt32 := do
+  match ← trySpawn argv env stdin stdout stderr setsid ctty keep record with
   | .ok pid => return pid
   | .error f =>
     let name := argv[0]?.getD ""
