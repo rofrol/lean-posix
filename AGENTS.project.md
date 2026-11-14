@@ -50,7 +50,9 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   path, opened and closed per call), `readFileAt` (device, inode, size and
   bytes from one descriptor; `FileAt`, `noSuchFile`), `drainNow` (a pipe's
   bytes without waiting), `handleFd` (the descriptor under an
-  `IO.FS.Handle`), `isatty`, `strerror`, `setTimes` (`utimes`).
+  `IO.FS.Handle`), `isatty`, `strerror`, `setTimes` (`utimes`). Its C is
+  `c/fd.c`, with `struct stat`, `struct timeval` and the constants from the
+  SDK's headers.
 - `Pty.lean`: `openPty` (raw), `loginTty`, `winSize` (stdout's),
   `winSizeOf` (any descriptor's, or the errno), `setWinSize`. Its C is
   `c/pty.c`, with `struct termios`, `struct winsize` and the constants from

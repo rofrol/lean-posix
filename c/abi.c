@@ -12,12 +12,10 @@
 #include <signal.h>
 #include <stddef.h>
 #include <sys/file.h>
-#include <sys/filio.h>
 #include <sys/ioctl.h>
 #include <sys/proc_info.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <sys/wait.h>
 
 #define SAME(name, value) _Static_assert((name) == (value), #name " is " #value)
@@ -50,14 +48,11 @@ SAME(SA_RESTART, 2);
 /* open and fcntl */
 SAME(O_RDONLY, 0);
 SAME(O_RDWR, 2);
-SAME(O_NONBLOCK, 4);
 SAME(O_CREAT, 0x200);
 SAME(O_DIRECTORY, 0x100000);
 SAME(O_CLOEXEC, 0x1000000);
 SAME(F_GETFD, 1);
 SAME(F_SETFD, 2);
-SAME(F_GETFL, 3);
-SAME(F_SETFL, 4);
 SAME(F_DUPFD_CLOEXEC, 67);
 SAME(FD_CLOEXEC, 1);
 
@@ -66,7 +61,6 @@ SAME(LOCK_EX, 2);
 SAME(LOCK_NB, 4);
 
 /* ioctl */
-SAME(FIONREAD, 0x4004667fUL);
 SAME(TIOCSCTTY, 0x20007461UL);
 
 /* resources, process information, wait status */
@@ -85,21 +79,14 @@ AT(struct sigaction, sa_mask, 8);
 AT(struct sigaction, sa_flags, 12);
 _Static_assert(sizeof(sigset_t) == 4, "sigset_t is 32 bits");
 
-/* { long s; int us; } */
-_Static_assert(sizeof(struct timeval) == 16 && sizeof(((struct timeval *)0)->tv_usec) == 4,
-               "struct timeval is a long and an int");
-AT(struct timeval, tv_sec, 0);
-AT(struct timeval, tv_usec, 8);
-
-/* `fstat64` and `stat64` into 18 or 32 unsigned long longs: st_dev (32 bits) at
- * 0, st_ino at 8, st_size at 96. Their `struct stat64` is the SDK's `struct
+/* `fstat64` and `stat64` into 32 unsigned long longs (lockHanded): st_dev (32 bits) at
+ * 0, st_ino at 8. Their `struct stat64` is the SDK's `struct
  * stat` with 64-bit inodes: the only one on arm64, which declares no `struct
  * stat64`, and the default on x86_64. */
 _Static_assert(sizeof(struct stat) == 144, "struct stat is 144 bytes");
 AT(struct stat, st_dev, 0);
 _Static_assert(sizeof(((struct stat *)0)->st_dev) == 4, "st_dev is 32 bits");
 AT(struct stat, st_ino, 8);
-AT(struct stat, st_size, 96);
 
 /* `getrusage` into 40 longs, the peak resident set the fifth */
 _Static_assert(sizeof(struct rusage) <= 40 * sizeof(long), "struct rusage fits 40 longs");
