@@ -67,7 +67,8 @@ Modules, each under `Posix/`, all in `namespace Posix`:
   `struct rusage`, `struct kevent` and the constants from the SDK's headers.
 - `Spawn.lean` (imports `Fd`): `trySpawn`/`spawn` (`posix_spawn` along
   `candidates`, the PATH lookup; optionally `POSIX_SPAWN_SETSID`; with `ctty`,
-  through the helper below; `SpawnFailure`, `inherit`, `devNull`,
+  through the helper below; with `keep`, the child gets the descriptors named
+  and no other, by `POSIX_SPAWN_CLOEXEC_DEFAULT`; `SpawnFailure`, `inherit`, `devNull`,
   `cttyHelperName`), `pipe`, `waitpid`, `waitOutcome` (`ExitOutcome`: an exit
   code or a signal, decoded by `ExitOutcome.ofStatus` with theorems),
   `writeAll`. `spawnRaw` is public but internal to `trySpawn`. One

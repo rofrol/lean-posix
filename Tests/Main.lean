@@ -270,6 +270,69 @@ def inherited (t : T) (dir : System.FilePath) : IO Unit := do
     unlock lk
   close s; close pr; close pw; close k; close m
 
+/-- The descriptors below `limit` open in `tests open-fds LIMIT`, spawned with
+`keep` and a pipe as its stdout. The program opens some of its own as it starts
+(Lean's runtime), which a child spawned with `keep := some #[]` shows. -/
+def keptFds (limit : Nat) (keep : Array UInt32) : IO (List Nat) := do
+  let (r, w) ← Posix.pipe
+  let pid ← spawn #[(← IO.appPath).toString, "open-fds", toString limit] #[] inherit w inherit (keep := some keep)
+  close w
+  let out ← linesOf r 1
+  close r
+  discard <| waitpid pid
+  return (out.trimAscii.toString.splitOn " ").filterMap String.toNat?
+
+/-- `keep`: a child gets its 0, 1 and 2 and the descriptors named, and no other,
+an inheritable copy and the parent's own close-on-exec ones included; the
+parent's stay close-on-exec. A kept lock is held by the child once the parent
+has let go of its own, until the child exits. With `ctty`, the helper's
+descriptors do not reach the child. -/
+def kept (t : T) (dir : System.FilePath) : IO Unit := do
+  let .ok lk ← lockFile (dir / "kept") false | t.check "lockFile takes the lock to keep" false
+  let (pr, pw) ← Posix.pipe
+  -- An inheritable copy, which `keep` leaves out though no close-on-exec is on it.
+  let d ← dupPrivate pr
+  dup2 pr d
+  let limit := [lk, pr, pw, d].foldl (fun a x => max a x.toNat) 0 + 1
+  let own ← keptFds limit #[]
+  let got ← keptFds limit #[lk]
+  let ours := [lk, pr, pw, d].map (·.toNat)
+  t.check "keep: the child has the kept descriptor and its own, none of the parent's others, an inheritable copy included"
+    (got.contains 1 && own.all (!ours.contains ·) && got == (lk.toNat :: own).mergeSort)
+    s!"with it {got}, with none kept {own}; lock {lk} pipe {pr} {pw} copy {d}"
+  close d
+  let without ← childFds limit
+  t.check "and the parent's kept descriptor is still close-on-exec" (!without.contains lk.toNat) s!"{without}"
+  -- The lock, kept by a child that waits for its stdin's end: held while it lives.
+  let (ir, iw) ← Posix.pipe
+  let pid ← spawn #["/bin/sh", "-c", "read x"] #[] ir (keep := some #[lk])
+  close ir
+  unlock lk
+  match ← lockFile (dir / "kept") false with
+  | .error e => t.check "a kept lock is held by the child once the parent let go of it" (e == lockHeld) s!"errno {e}"
+  | .ok fd => t.check "a kept lock is held by the child once the parent let go of it" false; unlock fd
+  close iw
+  discard <| waitpid pid
+  match ← lockFile (dir / "kept") false with
+  | .ok fd => t.check "and free once the child exited" true; unlock fd
+  | .error e => t.check "and free once the child exited" false s!"errno {e}"
+  -- With ctty, through the helper.
+  let (m, s) ← openPty
+  let pid ← spawn #[(← IO.appPath).toString, "open-fds", toString limit] #[] s s s (setsid := true) (ctty := true)
+    (keep := some #[pw])
+  let line ← linesOf m 1
+  discard <| waitpid pid
+  close s; close m
+  let got := (line.trimAscii.toString.splitOn " ").filterMap String.toNat?
+  t.check "keep with ctty: the child has its 0, 1, 2, its own and the kept descriptor, none of the helper's"
+    (got == ([0, 1, 2, pw.toNat] ++ own.filter (· > 2)).mergeSort) s!"{line.quote} kept {pw}, own {own}"
+  -- What keep refuses.
+  let r ← trySpawn #["true"] (keep := some #[999])
+  t.check "a kept descriptor that is not open fails at dup2 with EBADF" (r == .error { stage := "dup2", errno := 9 }) s!"{repr r}"
+  let refused ← (do discard <| trySpawn #["true"] (keep := some #[2]); pure false) <|> pure true
+  t.check "a kept descriptor 0, 1 or 2 is refused before anything starts" refused
+  close pr; close pw
+
 /-- The exit status of `tests lock-handed PATH FD` with `fd`, and `open` (a shell
 redirection) before it: 0 once it took over the lock, else the errno or 255. -/
 def handedIn (path : System.FilePath) (fd : UInt32) (open_ : String := "") : IO UInt32 := do
@@ -1074,6 +1137,7 @@ def main (args : List String) : IO UInt32 := do
     pty t
     cttyHelper t dir
     inherited t dir
+    kept t dir
     locks t dir
     kq t dir
     exits t

@@ -129,7 +129,7 @@ static void kill_and_reap(pid_t pid) {
 /* The ctty spawn: the helper at `helper`, given the child's descriptors and
    environment, does setsid, TIOCSCTTY and the execve along `c`; what it
    reports on the result pipe `p` decides. */
-static uint64_t spawn_ctty(const char *helper, posix_spawn_file_actions_t *fa, int p[2],
+static uint64_t spawn_ctty(const char *helper, posix_spawn_file_actions_t *fa, posix_spawnattr_t *at, int p[2],
                            char **c, size_t nc, char **argv, size_t na, char **env, int setsid_) {
     char wfd[16], count[24];
     snprintf(wfd, sizeof wfd, "%d", p[1]);
@@ -145,7 +145,7 @@ static uint64_t spawn_ctty(const char *helper, posix_spawn_file_actions_t *fa, i
     for (size_t i = 0; i < na; i++) v[5 + nc + i] = argv[i];
     v[5 + nc + na] = NULL;
     pid_t pid = 0;
-    int r = posix_spawn(&pid, helper, fa, NULL, v, env);
+    int r = posix_spawn(&pid, helper, fa, at, v, env);
     free(v);
     close(p[1]);
     if (r != 0) {
@@ -175,10 +175,14 @@ static uint64_t spawn_ctty(const char *helper, posix_spawn_file_actions_t *fa, i
     return res;
 }
 
-/* `spawnRaw` of Posix/Spawn.lean, with the ctty helper's path. */
+/* `spawnRaw` of Posix/Spawn.lean, with the ctty helper's path. With `only`,
+   the child gets its 0, 1 and 2 and the descriptors of `keep`, no other
+   (POSIX_SPAWN_CLOEXEC_DEFAULT, posix_spawn_file_actions_addinherit_np); the
+   parent's own are left as they are, so no copy is made. */
 LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg argv, b_lean_obj_arg envs,
                                           uint32_t in, uint32_t out, uint32_t err, uint8_t setsid_,
-                                          uint8_t ctty, b_lean_obj_arg helper) {
+                                          uint8_t ctty, uint8_t only, b_lean_obj_arg keep,
+                                          b_lean_obj_arg helper) {
     extern char **environ;
     size_t nc = lean_array_size(paths), na = lean_array_size(argv), ne = lean_array_size(envs), nv = 0;
     while (environ[nv]) nv++;
@@ -210,13 +214,16 @@ LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg a
     e[k] = NULL;
 
     int fds[3] = {(int)in, (int)out, (int)err};
+    size_t nk = only ? lean_array_size(keep) : 0;
     int nul = -1, p[2] = {-1, -1}, faInit = 0;
     posix_spawn_file_actions_t fa;
     uint64_t res = 0;
-    /* A source that is not open is refused before anything is made, so that
-       no descriptor made here can take its number. */
+    /* A source or a kept descriptor that is not open is refused before
+       anything is made, so that no descriptor made here can take its number. */
     for (int i = 0; i < 3 && !res; i++)
         if (fds[i] >= 0 && fcntl(fds[i], F_GETFD) < 0) res = failed(STAGE_DUP2, errno);
+    for (size_t i = 0; i < nk && !res; i++)
+        if (fcntl((int)lean_unbox_uint32(lean_array_get_core(keep, i)), F_GETFD) < 0) res = failed(STAGE_DUP2, errno);
     if (!res && (fds[0] == -2 || fds[1] == -2 || fds[2] == -2)) {
         nul = open("/dev/null", O_RDWR | O_CLOEXEC);
         if (nul >= 0) nul = above2(nul);
@@ -252,18 +259,44 @@ LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg a
             r = posix_spawn_file_actions_addinherit_np(&fa, p[1]);
             if (r != 0) res = failed(STAGE_DUP2, r);
         }
+        /* Under POSIX_SPAWN_CLOEXEC_DEFAULT only what the actions name stays
+           open: the 0, 1 and 2 the child inherits as they are (one the parent
+           has closed stays closed), and `keep`, close-on-exec cleared in the
+           child only. */
+        for (int i = 0; i < 3 && only && !res; i++)
+            if (fds[i] == -1 && fcntl(i, F_GETFD) >= 0) {
+                r = posix_spawn_file_actions_addinherit_np(&fa, i);
+                if (r != 0) res = failed(STAGE_DUP2, r);
+            }
+        for (size_t i = 0; i < nk && !res; i++) {
+            r = posix_spawn_file_actions_addinherit_np(&fa, (int)lean_unbox_uint32(lean_array_get_core(keep, i)));
+            if (r != 0) res = failed(STAGE_DUP2, r);
+        }
         if (res && ctty) {
             close(p[0]);
             close(p[1]);
         }
     }
+    posix_spawnattr_t at;
+    int atInit = 0;
+    if (!res) {
+        /* The session is the helper's to make with ctty, after its fork. */
+        short flags = (short)((setsid_ && !ctty ? POSIX_SPAWN_SETSID : 0) | (only ? POSIX_SPAWN_CLOEXEC_DEFAULT : 0));
+        int r = posix_spawnattr_init(&at);
+        if (r == 0) atInit = 1;
+        if (r == 0) r = posix_spawnattr_setflags(&at, flags);
+        if (r != 0) {
+            res = failed(STAGE_EXEC, r);
+            if (ctty) {
+                close(p[0]);
+                close(p[1]);
+            }
+        }
+    }
     if (!res && ctty) {
-        res = spawn_ctty(lean_string_cstr(helper), &fa, p, c, nc, v, na, e, setsid_);
+        res = spawn_ctty(lean_string_cstr(helper), &fa, &at, p, c, nc, v, na, e, setsid_);
     } else if (!res) {
-        posix_spawnattr_t at;
-        int r = posix_spawnattr_init(&at), atInit = r == 0;
-        if (r == 0 && setsid_) r = posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSID);
-        if (r != 0) res = failed(STAGE_EXEC, r);
+        int r;
         /* Each path in turn, as execvp tries them: one the kernel finds no file
            at is passed by; EACCES is said if some path had a file it would not
            execute and none ran; any other errno ends the search. */
@@ -279,8 +312,8 @@ LEAN_EXPORT lean_obj_res lean_posix_spawn(b_lean_obj_arg paths, b_lean_obj_arg a
             }
         }
         if (!res) res = failed(STAGE_EXEC, stop ? er : seen ? EACCES : ENOENT);
-        if (atInit) posix_spawnattr_destroy(&at);
     }
+    if (atInit) posix_spawnattr_destroy(&at);
     if (faInit) posix_spawn_file_actions_destroy(&fa);
     if (nul >= 0) close(nul);
     free(c);

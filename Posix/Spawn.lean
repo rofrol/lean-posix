@@ -40,7 +40,11 @@ child such a copy, which delays the end of the pipe until that child exits.
 Signals are left as the parent has them, as Lean's spawn leaves them: Lean
 ignores SIGPIPE, and so does the child (`defaultSignals` restores it before an
 `exec`). Descriptors the parent has open without close-on-exec stay open in the
-child, as with Lean's spawn.
+child, as with Lean's spawn, unless the spawn names the ones it keeps (`keep`):
+then the child has its 0, 1 and 2 and those only (`POSIX_SPAWN_CLOEXEC_DEFAULT`,
+`posix_spawn_file_actions_addinherit_np`), each kept one at its own number and
+open across the child's exec, while the parent's stays as it is, close-on-exec
+included, so no copy is made and none is left behind on a failure.
 
 All of it is C in `c/spawn.c`, which takes every constant and the wait-status
 macros from the SDK's headers.
@@ -58,7 +62,7 @@ initialize spawnLock : Std.Mutex Unit ← Std.Mutex.new ()
 
 @[extern "lean_posix_spawn"]
 private opaque spawnC (paths argv env : @& Array String) (stdin stdout stderr : UInt32) (setsid ctty : Bool)
-  (helper : @& String) : IO UInt64
+  (only : Bool) (keep : @& Array UInt32) (helper : @& String) : IO UInt64
 
 /-- The name of the ctty helper's executable, which `trySpawn` looks for in the
 directory of `IO.appPath`. -/
@@ -86,10 +90,16 @@ with `ctty`, since a spawn without it makes the session with
 descriptor that is not open is refused at `dup2` before anything is made, so no
 descriptor made here can take its number. A child whose setup or exec failed is
 reaped before this returns. With `ctty`, the child is started through the helper
-`cttyHelperName` next to `IO.appPath`. -/
-def spawnRaw (paths argv env : @& Array String) (stdin stdout stderr : UInt32) (setsid ctty : Bool) :
-    IO UInt64 := do
-  spawnC paths argv env stdin stdout stderr setsid ctty (← if ctty then cttyHelperPath else pure "")
+`cttyHelperName` next to `IO.appPath`. With `keep` some descriptors, each above
+2 and below 2^31, which the caller makes sure of as for the three streams
+(`trySpawn` throws otherwise), and open (one that is not is refused at `dup2`
+like a source), the child has
+its 0, 1 and 2 and those only; `none` leaves it every descriptor the parent has
+without close-on-exec. -/
+def spawnRaw (paths argv env : @& Array String) (stdin stdout stderr : UInt32) (setsid ctty : Bool)
+    (keep : Option (Array UInt32) := none) : IO UInt64 := do
+  spawnC paths argv env stdin stdout stderr setsid ctty keep.isSome (keep.getD #[])
+    (← if ctty then cttyHelperPath else pure "")
 
 /-- The paths `execvp` would try for `name`, from `path`, the value of PATH. -/
 def candidates (name : String) (path : Option String) : Array String :=
@@ -137,22 +147,37 @@ the program runs: the exec has succeeded by then. Or why no program runs, the ch
 being reaped already. The caller's descriptors stay open and its own: close the
 child's ends after the spawn, whatever its result. The pid is the caller's to reap
 (`waitpid`), once. Throws, starting nothing, when a descriptor is 0, 1 or 2, which
-the child's own setup would overwrite. -/
+the child's own setup would overwrite.
+
+With `keep := some fds`, the child gets its 0, 1 and 2 (`stdin`, `stdout` and
+`stderr` as given; one given as `inherit` that the parent has closed stays
+closed) and the descriptors `fds` at their own numbers, open across its exec,
+and no other: none of the parent's, whether close-on-exec or not, and with
+`ctty` none of the helper's. The parent's descriptors stay as they are, `fds`
+close-on-exec ones included: nothing is copied, so nothing is left open on a
+failure. Each of `fds` must be open, else the spawn fails at `dup2` with EBADF
+before anything is made; the caller keeps them open until this returns. With
+`keep := none`, the child also gets every descriptor the parent has open without
+close-on-exec. Throws, starting nothing, when a kept descriptor is 0, 1 or 2 or
+not below 2^31. -/
 def trySpawn (argv : Array String) (env : Array String := #[]) (stdin stdout stderr : UInt32 := inherit)
-    (setsid ctty := false) : IO (Except SpawnFailure UInt32) := do
+    (setsid ctty := false) (keep : Option (Array UInt32) := none) : IO (Except SpawnFailure UInt32) := do
   for fd in [stdin, stdout, stderr] do
     unless fd == inherit || fd == devNull || fd > 2 do
       throw (IO.userError s!"Posix.spawn: descriptor {fd} is one of the child's 0, 1 and 2: give inherit")
+  for fd in keep.getD #[] do
+    unless fd > 2 && fd < 0x80000000 do
+      throw (IO.userError s!"Posix.spawn: descriptor {fd} cannot be kept: it is one of the child's 0, 1 and 2, or no descriptor")
   let paths := candidates (argv[0]?.getD "") (← IO.getEnv "PATH")
-  let r ← spawnLock.atomically do spawnRaw paths argv env stdin stdout stderr setsid ctty
+  let r ← spawnLock.atomically do spawnRaw paths argv env stdin stdout stderr setsid ctty keep
   if r >>> 63 == 0 then return .ok r.toUInt32
   return .error { stage := SpawnFailure.ofStage ((r >>> 32) &&& 0xff).toUInt32, errno := r.toUInt32 }
 
 /-- `trySpawn`, throwing why no program runs: `cannot execute NAME: REASON`, or
 `cannot start NAME: STAGE: REASON` for a failure of the setup before the exec. -/
 def spawn (argv : Array String) (env : Array String := #[]) (stdin stdout stderr : UInt32 := inherit)
-    (setsid ctty := false) : IO UInt32 := do
-  match ← trySpawn argv env stdin stdout stderr setsid ctty with
+    (setsid ctty := false) (keep : Option (Array UInt32) := none) : IO UInt32 := do
+  match ← trySpawn argv env stdin stdout stderr setsid ctty keep with
   | .ok pid => return pid
   | .error f =>
     let name := argv[0]?.getD ""
