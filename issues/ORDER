@@ -1,6 +1,5 @@
 ## Next, in order
 
-ot2tus lean-posix: move the Pty, Fd and Lock bindings into the C file, with real termios, winsize, stat and fcntl declarations
 vq7btc lean-posix: move the Process bindings into the C file, with <libproc.h> and <signal.h>
 mtobhv lean-posix: move Spawn's pipe, waitpid, waitStatus and writeAll into the C file; spawnRaw waits for 53zc6j
 quboep lean-posix: design how 53zc6j's ctty helper executable is built, shipped and found by consumers
