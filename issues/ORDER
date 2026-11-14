@@ -15,6 +15,5 @@ l7upxo lean-posix: assert the inline expressions' hand-written function declarat
 s5yrc7 lean-posix: move catchSignals' handler into c/ as a true void handler(int)
 4krth7 lean-posix: drop c/abi.c's struct sigaction, sigset_t and SA_RESTART assertions, which no inline expression uses
 tuw6vt lean-posix: Posix.exec with an empty argv passes NULL to execvp
-yjesyi lean-posix: note for 53zc6j: the ctty helper's packaging waits on the owner's choice in docs/decisions/0001-ctty-helper.md (quboep result)
 
 ## Needs a decision
