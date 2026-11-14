@@ -1,6 +1,5 @@
 ## Next, in order
 
-qgxw6v lean-posix: three bindings rr2 needs, in one pin: a session kill, a one-descriptor append, and a spawn that hands chosen descriptors to the child only
 gaqolj lean-posix: termCtl's numeric op as an inductive, signals apart from the screen's ops
 x3fn73 lean-posix: typed results for watch, openEvents and watchSession
 7gq47o lean-posix: typed results for openPty, loginTty, lockDir and the Lock raw declarations
@@ -16,5 +15,7 @@ s5yrc7 lean-posix: move catchSignals' handler into c/ as a true void handler(int
 tuw6vt lean-posix: Posix.exec with an empty argv passes NULL to execvp
 7jmon7 lean-posix: retire c/abi.c and the inline-expression rules now that Posix/ has no extern c inline
 pms2lm lean-posix: a ctty spawn near ARG_MAX fails at the helper where the program alone would start
+4cxhy4 lean-posix: killSession can signal a process that took a member's pid between its second getsid and its kill: accept the window or find a fix
+atkubz lean-posix: test the record barrier with the helper held before it publishes
 
 ## Needs a decision
